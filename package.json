@@ -1,9 +1,31 @@
 {
   "name": "dsh-api-client",
-  "version": "0.0.1-spike.0",
-  "description": "Agent-native API Client for DeepSeek Harness — M0 compatibility spike probe plugin (host half + client half).",
+  "version": "0.1.0",
+  "description": "Agent-native API Client for DeepSeek Harness — Postman 级 API 调试 UI + Agent 原生 HTTP 工具 + Postman Collection 导入的 DSH 原生插件",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "author": "chenkun (https://github.com/Beatther-c)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Beatther-c/dsh-api-client.git"
+  },
+  "homepage": "https://github.com/Beatther-c/dsh-api-client#readme",
+  "bugs": "https://github.com/Beatther-c/dsh-api-client/issues",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "api-client",
+    "postman",
+    "agent-tools",
+    "http-client"
+  ],
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     ".": "./dist/index.js",
     "./client": "./dist/client.js",
@@ -24,7 +46,8 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
-    "gen:manifest-contract": "tsx scripts/gen-manifest-contract.ts"
+    "gen:manifest-contract": "tsx scripts/gen-manifest-contract.ts",
+    "prepublishOnly": "pnpm build"
   },
   "peerDependencies": {
     "react": "^18.2.0"
