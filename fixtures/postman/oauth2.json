@@ -1,0 +1,38 @@
+{
+  "info": {
+    "_postman_id": "f1a2b3c4-0005-4000-8000-000000000005",
+    "name": "oauth2-collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "oauth2-request",
+      "request": {
+        "method": "GET",
+        "url": "https://api.example.com/oauth2-protected",
+        "auth": {
+          "type": "oauth2",
+          "oauth2": [
+            { "key": "accessToken", "value": "ya29.example-token" },
+            { "key": "tokenType", "value": "Bearer" },
+            { "key": "addTokenTo", "value": "header" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "digest-request",
+      "request": {
+        "method": "GET",
+        "url": "https://api.example.com/digest-protected",
+        "auth": {
+          "type": "digest",
+          "digest": [
+            { "key": "username", "value": "alice" },
+            { "key": "password", "value": "s3cret" }
+          ]
+        }
+      }
+    }
+  ]
+}

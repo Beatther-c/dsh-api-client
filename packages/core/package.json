@@ -1,0 +1,15 @@
+{
+  "name": "@dsh-api-client/core",
+  "version": "0.0.1-spike.0",
+  "description": "dsh-api-client core logic (V01 §3.2). Pure TypeScript, zero DSH/React imports; no side effects except executor network I/O.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@dsh-api-client/shared": "workspace:*",
+    "undici": "^8.10.2"
+  }
+}

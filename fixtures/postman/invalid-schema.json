@@ -1,0 +1,16 @@
+{
+  "info": {
+    "_postman_id": "f1a2b3c4-0007-4000-8000-000000000007",
+    "name": "invalid-schema-collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "get-status",
+      "request": {
+        "method": "GET",
+        "url": "https://api.example.com/status"
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "info": {
+    "_postman_id": "f1a2b3c4-0002-4000-8000-000000000002",
+    "name": "nested-folders-collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "ping",
+      "request": {
+        "method": "GET",
+        "url": "https://api.example.com/ping"
+      }
+    },
+    {
+      "name": "level-one",
+      "item": [
+        {
+          "name": "l1-request",
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.com/l1"
+          }
+        },
+        {
+          "name": "level-two",
+          "item": [
+            {
+              "name": "level-three",
+              "item": [
+                {
+                  "name": "deep-request",
+                  "request": {
+                    "method": "POST",
+                    "url": "https://api.example.com/deep",
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\"ok\":true}",
+                      "options": { "raw": { "language": "json" } }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

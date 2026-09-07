@@ -1,0 +1,15 @@
+{
+  "name": "@dsh-api-client/postman-adapter",
+  "version": "0.0.1-spike.0",
+  "description": "Postman Collection v2.1 import adapter for dsh-api-client (DESIGN_V1.1 §15). Pure TypeScript, zero DSH/React imports; scripts are parsed/detected/displayed, never executed.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@dsh-api-client/core": "workspace:*",
+    "@dsh-api-client/shared": "workspace:*"
+  }
+}

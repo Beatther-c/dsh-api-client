@@ -1,0 +1,85 @@
+{
+  "info": {
+    "_postman_id": "f1a2b3c4-0003-4000-8000-000000000003",
+    "name": "all-auth-collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "get-basic",
+      "request": {
+        "method": "GET",
+        "url": "https://api.example.com/basic",
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "alice" },
+            { "key": "password", "value": "s3cret" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "post-bearer",
+      "request": {
+        "method": "POST",
+        "url": "https://api.example.com/bearer",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "tok_abc123" }]
+        }
+      }
+    },
+    {
+      "name": "put-apikey-header",
+      "request": {
+        "method": "PUT",
+        "url": "https://api.example.com/apikey",
+        "auth": {
+          "type": "apikey",
+          "apikey": [
+            { "key": "key", "value": "X-API-Key" },
+            { "key": "value", "value": "key-xyz" },
+            { "key": "in", "value": "header" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "patch-apikey-query",
+      "request": {
+        "method": "PATCH",
+        "url": "https://api.example.com/apikey-query",
+        "auth": {
+          "type": "apikey",
+          "apikey": [
+            { "key": "key", "value": "api_key" },
+            { "key": "value", "value": "key-xyz" },
+            { "key": "in", "value": "query" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete-plain",
+      "request": {
+        "method": "DELETE",
+        "url": "https://api.example.com/item/1"
+      }
+    },
+    {
+      "name": "head-plain",
+      "request": {
+        "method": "HEAD",
+        "url": "https://api.example.com/item/1"
+      }
+    },
+    {
+      "name": "options-plain",
+      "request": {
+        "method": "OPTIONS",
+        "url": "https://api.example.com/item/1"
+      }
+    }
+  ]
+}

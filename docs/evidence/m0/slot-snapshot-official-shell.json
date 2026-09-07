@@ -1,0 +1,1393 @@
+{
+  "capturedAt": "2026-09-06T16:07:06.868Z",
+  "snapshot": [
+    {
+      "name": "root",
+      "kind": "single",
+      "scope": "root",
+      "declaredBy": "(built-in)",
+      "occupants": [
+        {
+          "registrant": "H5",
+          "priority": 0,
+          "active": true
+        }
+      ],
+      "children": [
+        {
+          "name": "shell.overlay",
+          "kind": "list",
+          "scope": "root",
+          "declaredBy": "an entry in \"root\" (H5)",
+          "occupants": [
+            {
+              "registrant": "dsh-market",
+              "id": "dsh-market-toast",
+              "priority": 0,
+              "active": true
+            }
+          ],
+          "children": []
+        },
+        {
+          "name": "sidebar",
+          "kind": "single",
+          "scope": "root",
+          "declaredBy": "an entry in \"root\" (H5)",
+          "occupants": [
+            {
+              "registrant": "H5",
+              "priority": 0,
+              "active": true
+            }
+          ],
+          "children": [
+            {
+              "name": "sidebar.brand.mark",
+              "kind": "single",
+              "scope": "root",
+              "declaredBy": "an entry in \"sidebar\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "sidebar.settings",
+              "kind": "single",
+              "scope": "root",
+              "declaredBy": "an entry in \"sidebar\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": [
+                {
+                  "name": "settings.section",
+                  "kind": "list",
+                  "scope": "root",
+                  "declaredBy": "an entry in \"sidebar.settings\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "id": "general",
+                      "order": 0,
+                      "priority": 0,
+                      "active": true
+                    },
+                    {
+                      "registrant": "H5",
+                      "id": "models",
+                      "order": 10,
+                      "priority": 0,
+                      "active": true
+                    },
+                    {
+                      "registrant": "H5",
+                      "id": "plugins",
+                      "order": 15,
+                      "priority": 0,
+                      "active": true
+                    },
+                    {
+                      "registrant": "H5",
+                      "id": "agent-presets",
+                      "order": 20,
+                      "priority": 0,
+                      "active": true
+                    },
+                    {
+                      "registrant": "dsh-market",
+                      "id": "market",
+                      "order": 40,
+                      "priority": 0,
+                      "active": true
+                    },
+                    {
+                      "registrant": "H5",
+                      "id": "better-sidebar",
+                      "order": 100,
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": [
+                    {
+                      "name": "settings.general.item",
+                      "kind": "list",
+                      "scope": "root",
+                      "declaredBy": "an entry in \"settings.section\" (H5)",
+                      "occupants": [
+                        {
+                          "registrant": "H5",
+                          "id": "permission",
+                          "order": -20,
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "id": "language",
+                          "order": 0,
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "id": "appearance",
+                          "order": 10,
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "id": "font-size",
+                          "order": 11,
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "id": "transcript-view",
+                          "order": 12,
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "id": "composer-enter",
+                          "order": 20,
+                          "priority": 0,
+                          "active": true
+                        }
+                      ],
+                      "children": []
+                    },
+                    {
+                      "name": "settings.plugins.tab",
+                      "kind": "list",
+                      "scope": "root",
+                      "declaredBy": "an entry in \"settings.section\" (H5)",
+                      "occupants": [
+                        {
+                          "registrant": "H5",
+                          "id": "configurable",
+                          "order": 0,
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "id": "all",
+                          "order": 10,
+                          "priority": 0,
+                          "active": true
+                        }
+                      ],
+                      "children": [
+                        {
+                          "name": "settings.plugin.item",
+                          "kind": "keyed",
+                          "scope": "root",
+                          "declaredBy": "an entry in \"settings.plugins.tab\" (H5)",
+                          "occupants": [
+                            {
+                              "registrant": "dsh-market",
+                              "key": "dsh-market",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "shell",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "agent-loop",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "subagent-model-selection",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "web-search-deepseek",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "univer-office",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "modsearch",
+                              "id": "modsearch",
+                              "order": 31,
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "dsh-api-client",
+                              "key": "api-client",
+                              "priority": 0,
+                              "active": true
+                            }
+                          ],
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "name": "settings.models.provider-card",
+                      "kind": "keyed",
+                      "scope": "root",
+                      "declaredBy": "an entry in \"settings.section\" (H5)",
+                      "occupants": [],
+                      "children": []
+                    },
+                    {
+                      "name": "settings.models.footer",
+                      "kind": "list",
+                      "scope": "root",
+                      "declaredBy": "an entry in \"settings.section\" (H5)",
+                      "occupants": [],
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "name": "settings.trigger",
+                  "kind": "single",
+                  "scope": "root",
+                  "declaredBy": "an entry in \"sidebar.settings\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "settings.header",
+                  "kind": "single",
+                  "scope": "root",
+                  "declaredBy": "an entry in \"sidebar.settings\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "settings.action",
+                  "kind": "list",
+                  "scope": "root",
+                  "declaredBy": "an entry in \"sidebar.settings\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "id": "open-document",
+                      "order": 0,
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "settings.close",
+                  "kind": "single",
+                  "scope": "root",
+                  "declaredBy": "an entry in \"sidebar.settings\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "settings.onboarding",
+                  "kind": "list",
+                  "scope": "root",
+                  "declaredBy": "an entry in \"sidebar.settings\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "id": "welcome-notice",
+                      "order": -100,
+                      "priority": 0,
+                      "active": true
+                    },
+                    {
+                      "registrant": "H5",
+                      "id": "deepseek-official",
+                      "order": 0,
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "sidebar.footer.action",
+              "kind": "list",
+              "scope": "root",
+              "declaredBy": "an entry in \"sidebar\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "id": "cordis-panel",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "sidebar.workspaces",
+              "kind": "single",
+              "scope": "root",
+              "declaredBy": "an entry in \"sidebar\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": [
+                {
+                  "name": "sidebar.workspaces.directoryFlow",
+                  "kind": "single",
+                  "scope": "root",
+                  "declaredBy": "an entry in \"sidebar.workspaces\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "sidebar.brand.name",
+              "kind": "single",
+              "scope": "root",
+              "declaredBy": "an entry in \"sidebar\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "conversation",
+          "kind": "single",
+          "scope": "session-maybe",
+          "declaredBy": "an entry in \"root\" (H5)",
+          "occupants": [
+            {
+              "registrant": "H5",
+              "priority": 0,
+              "active": true
+            }
+          ],
+          "children": [
+            {
+              "name": "conversation.input.dock",
+              "kind": "list",
+              "scope": "session",
+              "declaredBy": "an entry in \"conversation\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "conversation-todo-dock",
+                  "id": "todo",
+                  "order": 0,
+                  "priority": 0,
+                  "active": true
+                },
+                {
+                  "registrant": "H5",
+                  "id": "goal",
+                  "order": 10,
+                  "priority": 0,
+                  "active": true
+                },
+                {
+                  "registrant": "conversation-queue-dock",
+                  "id": "queue",
+                  "order": 20,
+                  "priority": 0,
+                  "active": true
+                },
+                {
+                  "registrant": "H5",
+                  "id": "genui-panel",
+                  "order": 50,
+                  "priority": 0,
+                  "active": true
+                },
+                {
+                  "registrant": "H5",
+                  "id": "univer-dock",
+                  "order": 400,
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "conversation.composer",
+              "kind": "chain",
+              "scope": "session",
+              "declaredBy": "an entry in \"conversation\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": -10,
+                  "active": true
+                },
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                },
+                {
+                  "registrant": "H5",
+                  "priority": 1,
+                  "active": true
+                }
+              ],
+              "children": [
+                {
+                  "name": "conversation.approval.detail",
+                  "kind": "single",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.composer\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "conversation.hero.workspace",
+              "kind": "single",
+              "scope": "root",
+              "declaredBy": "an entry in \"conversation\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": [
+                {
+                  "name": "conversation.hero.workspace.directoryFlow",
+                  "kind": "single",
+                  "scope": "root",
+                  "declaredBy": "an entry in \"conversation.hero.workspace\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "conversation.session",
+              "kind": "single",
+              "scope": "session",
+              "declaredBy": "an entry in \"conversation\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": [
+                {
+                  "name": "conversation.view",
+                  "kind": "list",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.session\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "id": "chat",
+                      "order": 0,
+                      "priority": 0,
+                      "active": true
+                    },
+                    {
+                      "registrant": "H5",
+                      "id": "trajectory",
+                      "order": 10,
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": [
+                    {
+                      "name": "conversation.chat.node",
+                      "kind": "keyed",
+                      "scope": "session",
+                      "declaredBy": "an entry in \"conversation.view\" (H5)",
+                      "occupants": [
+                        {
+                          "registrant": "H5",
+                          "key": "tool-call",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "user",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "steering",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "context",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "system-prompt",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "assistant-step",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "command",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "manual-compaction",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "compaction",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "model-retry",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "turn-error",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "turn-max-tokens",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "turn-process",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "turn-tail",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "unknown",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "workflow-run",
+                          "priority": 0,
+                          "active": true
+                        },
+                        {
+                          "registrant": "H5",
+                          "key": "command-input",
+                          "priority": 0,
+                          "active": true
+                        }
+                      ],
+                      "children": [
+                        {
+                          "name": "tool.call.toolview",
+                          "kind": "keyed",
+                          "scope": "session",
+                          "declaredBy": "an entry in \"conversation.chat.node\" (H5)",
+                          "occupants": [
+                            {
+                              "registrant": "bash-toolview-sample",
+                              "key": "bash",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "read-toolview",
+                              "key": "read",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "file-mutation-toolview",
+                              "key": "edit",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "file-mutation-toolview",
+                              "key": "write",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "search-toolview",
+                              "key": "grep",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "search-toolview",
+                              "key": "glob",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "web-toolview",
+                              "key": "web_search",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "web-toolview",
+                              "key": "web_fetch",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "todo-toolview",
+                              "key": "todo_write",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "ask-question-toolview",
+                              "key": "ask_user_question",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "render_ui",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "cordis_define",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "cordis_run",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "cordis_stop",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "cordis_undefine",
+                              "priority": 0,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "key": "skill",
+                              "priority": 0,
+                              "active": true
+                            }
+                          ],
+                          "children": [
+                            {
+                              "name": "tool.view.cordis",
+                              "kind": "keyed",
+                              "scope": "session",
+                              "declaredBy": "an entry in \"tool.call.toolview\" (H5)",
+                              "occupants": [],
+                              "children": []
+                            }
+                          ]
+                        },
+                        {
+                          "name": "conversation.chat.assistant-actions",
+                          "kind": "list",
+                          "scope": "session",
+                          "declaredBy": "an entry in \"conversation.chat.node\" (H5)",
+                          "occupants": [
+                            {
+                              "registrant": "H5",
+                              "id": "feedback",
+                              "order": 10,
+                              "priority": 0,
+                              "active": true
+                            }
+                          ],
+                          "children": []
+                        },
+                        {
+                          "name": "conversation.chat.turnTail",
+                          "kind": "chain",
+                          "scope": "session",
+                          "declaredBy": "an entry in \"conversation.chat.node\" (H5)",
+                          "occupants": [
+                            {
+                              "registrant": "H5",
+                              "priority": -10,
+                              "active": true
+                            },
+                            {
+                              "registrant": "dsh-better-sidebar",
+                              "priority": -1,
+                              "active": true
+                            },
+                            {
+                              "registrant": "H5",
+                              "priority": 0,
+                              "active": true
+                            }
+                          ],
+                          "children": []
+                        },
+                        {
+                          "name": "conversation.chat.commandview",
+                          "kind": "keyed",
+                          "scope": "session",
+                          "declaredBy": "an entry in \"conversation.chat.node\" (H5)",
+                          "occupants": [],
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "name": "conversation.message.images",
+                      "kind": "single",
+                      "scope": "session",
+                      "declaredBy": "an entry in \"conversation.view\" (H5)",
+                      "occupants": [
+                        {
+                          "registrant": "H5",
+                          "priority": 0,
+                          "active": true
+                        }
+                      ],
+                      "children": []
+                    },
+                    {
+                      "name": "conversation.trajectory.images",
+                      "kind": "single",
+                      "scope": "session",
+                      "declaredBy": "an entry in \"conversation.view\" (H5)",
+                      "occupants": [
+                        {
+                          "registrant": "H5",
+                          "priority": 0,
+                          "active": true
+                        }
+                      ],
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "conversation.session.header",
+              "kind": "single",
+              "scope": "session",
+              "declaredBy": "an entry in \"conversation\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": [
+                {
+                  "name": "conversation.session.header.utilities",
+                  "kind": "list",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.session.header\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "id": "session-log-download",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "conversation.session.header.actions",
+                  "kind": "list",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.session.header\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "id": "agent-preset",
+                      "order": -10,
+                      "priority": 0,
+                      "active": true
+                    },
+                    {
+                      "registrant": "H5",
+                      "id": "job-list",
+                      "order": 20,
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "conversation.session.header.lineage",
+                  "kind": "single",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.session.header\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "conversation.composer.bar",
+              "kind": "single",
+              "scope": "session-maybe",
+              "declaredBy": "an entry in \"conversation\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": [
+                {
+                  "name": "conversation.input.plan",
+                  "kind": "single",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.composer.bar\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "conversation.input.attachments",
+                  "kind": "single",
+                  "scope": "session-maybe",
+                  "declaredBy": "an entry in \"conversation.composer.bar\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "conversation.input.overlay",
+                  "kind": "list",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.composer.bar\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "id": "slash-menu",
+                      "order": 0,
+                      "priority": 0,
+                      "active": true
+                    },
+                    {
+                      "registrant": "H5",
+                      "id": "command-popup",
+                      "order": 1,
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "conversation.input.model",
+                  "kind": "single",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.composer.bar\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "conversation.input.left",
+                  "kind": "list",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.composer.bar\" (H5)",
+                  "occupants": [],
+                  "children": []
+                },
+                {
+                  "name": "conversation.input.right",
+                  "kind": "list",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.composer.bar\" (H5)",
+                  "occupants": [],
+                  "children": []
+                },
+                {
+                  "name": "conversation.composer.dock",
+                  "kind": "list",
+                  "scope": "session",
+                  "declaredBy": "an entry in \"conversation.composer.bar\" (H5)",
+                  "occupants": [
+                    {
+                      "registrant": "H5",
+                      "id": "stats",
+                      "order": 0,
+                      "priority": 0,
+                      "active": true
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "conversation.hero.brand.mark",
+              "kind": "single",
+              "scope": "root",
+              "declaredBy": "an entry in \"conversation\" (H5)",
+              "occupants": [],
+              "children": []
+            },
+            {
+              "name": "conversation.hero.agentPreset",
+              "kind": "single",
+              "scope": "root",
+              "declaredBy": "an entry in \"conversation\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "details",
+          "kind": "single",
+          "scope": "session",
+          "declaredBy": "an entry in \"root\" (H5)",
+          "occupants": [
+            {
+              "registrant": "H5",
+              "priority": 0,
+              "active": true
+            }
+          ],
+          "children": [
+            {
+              "name": "conversation.details.tool",
+              "kind": "single",
+              "scope": "session",
+              "declaredBy": "an entry in \"details\" (H5)",
+              "occupants": [
+                {
+                  "registrant": "H5",
+                  "priority": 0,
+                  "active": true
+                }
+              ],
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "features": {
+    "slotsAvailable": true,
+    "registerAvailable": true,
+    "injectAvailable": true,
+    "degraded": false,
+    "slots": [
+      {
+        "key": "conversation",
+        "declared": true,
+        "occupants": [
+          {
+            "registrant": "H5",
+            "priority": 0,
+            "active": true
+          }
+        ],
+        "kind": "single",
+        "scope": "session-maybe",
+        "declaredBy": "an entry in \"root\" (H5)"
+      },
+      {
+        "key": "settings.plugin.item",
+        "declared": true,
+        "occupants": [
+          {
+            "registrant": "dsh-market",
+            "key": "dsh-market",
+            "priority": 0,
+            "active": true
+          },
+          {
+            "registrant": "H5",
+            "key": "shell",
+            "priority": 0,
+            "active": true
+          },
+          {
+            "registrant": "H5",
+            "key": "agent-loop",
+            "priority": 0,
+            "active": true
+          },
+          {
+            "registrant": "H5",
+            "key": "subagent-model-selection",
+            "priority": 0,
+            "active": true
+          },
+          {
+            "registrant": "H5",
+            "key": "web-search-deepseek",
+            "priority": 0,
+            "active": true
+          },
+          {
+            "registrant": "H5",
+            "key": "univer-office",
+            "priority": 0,
+            "active": true
+          },
+          {
+            "registrant": "H5",
+            "key": "modsearch",
+            "id": "modsearch",
+            "order": 31,
+            "priority": 0,
+            "active": true
+          }
+        ],
+        "kind": "keyed",
+        "scope": "root",
+        "declaredBy": "an entry in \"settings.plugins.tab\" (H5)"
+      },
+      {
+        "key": "sidebar.footer.action",
+        "declared": true,
+        "occupants": [
+          {
+            "registrant": "H5",
+            "id": "cordis-panel",
+            "priority": 0,
+            "active": true
+          }
+        ],
+        "kind": "list",
+        "scope": "root",
+        "declaredBy": "an entry in \"sidebar\" (H5)"
+      }
+    ],
+    "notes": []
+  },
+  "conversationSpec": {
+    "kind": "single",
+    "scope": "session-maybe"
+  },
+  "settingsItemSpec": {
+    "kind": "keyed",
+    "scope": "root"
+  },
+  "sidebarFooterSpec": {
+    "kind": "list",
+    "scope": "root"
+  },
+  "sidebarSpec": {
+    "kind": "single",
+    "scope": "root"
+  },
+  "services": [
+    {
+      "name": "slots",
+      "present": true,
+      "ownKeys": [
+        "ctx",
+        "name",
+        "_core",
+        "_stores",
+        "_storeScopeOwners",
+        "_renderer",
+        "_locale",
+        "_host",
+        "_rootContributions",
+        "_rootListeners",
+        "_rootBinding",
+        "_rootSource",
+        "_scopes",
+        "_scopeRevision",
+        "_scopeListeners",
+        "_scopeRevisionSource"
+      ],
+      "protoKeys": [
+        "inject",
+        "install",
+        "installLocale",
+        "provideRoot",
+        "installScope",
+        "bindStoreScope",
+        "renderSlot",
+        "entries",
+        "entriesOfSlot",
+        "snapshot",
+        "onEntryError",
+        "spec",
+        "subscribe",
+        "getVersion",
+        "_register",
+        "hostFace",
+        "rebuildRootBinding",
+        "publishScopeRevision",
+        "resolveStore",
+        "clearStoreScope",
+        "_acquire",
+        "_release",
+        "register"
+      ]
+    },
+    {
+      "name": "sessions",
+      "present": true,
+      "ownKeys": [
+        "rootCtx",
+        "searchResultLimit",
+        "list",
+        "manager",
+        "selection",
+        "scopes",
+        "scopeDrops",
+        "watched",
+        "deferredRemovals"
+      ],
+      "protoKeys": [
+        "open",
+        "openSubagent",
+        "subagentAddress",
+        "setSubagentCatalogOpen",
+        "refreshSubagents",
+        "clear",
+        "refresh",
+        "search",
+        "handleControlFrame",
+        "handleSessionAdded",
+        "handleSessionRemoved",
+        "handleSessionStatus",
+        "handleSessionActivity",
+        "handleSessionError",
+        "handleConnected",
+        "create",
+        "fork",
+        "scope",
+        "resolveAgentScope",
+        "scopeOf",
+        "sessionOf",
+        "binding",
+        "followCurrent",
+        "resolve",
+        "materializeScope",
+        "eligible",
+        "projectList",
+        "pruneScopes",
+        "startScopeDrop",
+        "drainScopeDrops",
+        "dropScope",
+        "sweepDeferred"
+      ]
+    },
+    {
+      "name": "theme",
+      "present": true,
+      "ownKeys": [
+        "ctx",
+        "host",
+        "themes",
+        "preference",
+        "fontSize",
+        "revision",
+        "snapshot",
+        "media",
+        "overrides",
+        "overrideSeq"
+      ],
+      "protoKeys": [
+        "getTheme",
+        "exportInspectTokens",
+        "setTheme",
+        "setFontSize",
+        "adopt",
+        "register",
+        "overrideTokens",
+        "buildSnapshot",
+        "composeActive",
+        "publish"
+      ]
+    },
+    {
+      "name": "composer",
+      "present": false
+    },
+    {
+      "name": "renderer",
+      "present": false
+    },
+    {
+      "name": "locale",
+      "present": true,
+      "ownKeys": [
+        "dicts",
+        "bound",
+        "catalog",
+        "fallbackChains",
+        "snapshot",
+        "listeners",
+        "ctx",
+        "host",
+        "provisional",
+        "preference"
+      ],
+      "protoKeys": [
+        "getLocale",
+        "getSnapshot",
+        "subscribe",
+        "setLocale",
+        "addLanguage",
+        "adopt",
+        "publishCatalog",
+        "resolveActive",
+        "localeList",
+        "assertFallbackChain",
+        "fallbackChain",
+        "register",
+        "bind",
+        "translate",
+        "lookup",
+        "publish"
+      ]
+    }
+  ]
+}

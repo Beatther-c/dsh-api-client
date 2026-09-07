@@ -1,0 +1,14 @@
+# dsh-api-client bundle patch: inserts the dual-face probe plugin row into the
+# profile roster. Applied as a profile bundle layer (the `dsh.bundle.patch`
+# manifest field) over dsh-base; activate with
+# `dsh plugin --profile <name> add link:<this repository>`.
+#
+# The row is a bare plugin by package name: the node half (exports ".") runs
+# in the host process (system-prompt announcement contribution included), and
+# the `dsh.client` declaration in package.json makes the browser half
+# (exports "./client", served at /plugins/<id>/client.js) load in the web GUI.
+# Format follows the shipped sample @linxin666/dsh-client-ui-task-board
+# (REVIEW_NOTES_V1.1 §五).
+- insert:
+    - id: api-client
+      name: 'dsh-api-client'

@@ -1,0 +1,65 @@
+/**
+ * Generate `fixtures/client-manifest-contract.json` (M0 §2.5/§6.6): reads
+ * this plugin's package.json and merges the WP0 runtime record (V-16/TC-M0-10/11
+ * verified against the live DSH 0.1.2-rc.1 web profile, 2026-09-06).
+ */
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+interface PluginManifest {
+  name: string
+  version: string
+  exports: Record<string, string>
+  dsh: Record<string, unknown>
+}
+
+const manifest = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as PluginManifest
+
+const contract = {
+  dshVersion: '0.1.2-rc.1',
+  manifest: {
+    exports: manifest.exports,
+    dsh: manifest.dsh,
+  },
+  scannerBehavior: {
+    recognizedAsClientModule:
+      'yes (TC-M0-10, live): client-modules resolveMeta reads exports["./client"] (string or {default} form) ' +
+      'when dsh.client.platform === "web"; the row joins the application combo batch and the client boots ' +
+      '(probe surface + sidebar entry render verified)',
+    clientJsServedAt:
+      '/plugins/??<pkg>/client.js[,<more segments>]&rev=<hash> (TC-M0-10, live): combo URL segments are ' +
+      'comma-joined; the bare segment without a rev 404s, a stale rev 404s, and the rev bumps on every ' +
+      'dist/client.js change via client-hmr (chokidar-watched)',
+    missingClientExportBehavior:
+      'boot-fatal (TC-M0-11, live): removing exports["./client"] while dsh.client is declared makes the whole ' +
+      'web profile fail to boot — "dsh: plugin tree failed to load: failed to apply loader entry modules ' +
+      '(@deepseek-ai/dsh-client-modules): client-modules: 1 client package failed to compose: ' +
+      'client-modules: dsh-api-client declares dsh.client but exports no "./client" bundle". ' +
+      'Caveat: manifest edits are NOT re-read on live recompose — resolveMeta memoizes package metadata per ' +
+      'sourceKey for the process lifetime (client/modules/src/index.ts), so the negative only bites at process start',
+    moduleFormat:
+      'lazy-CJS: window.__ModuleLoader__.load({id, factory}) — factory(require) materializes exports; ' +
+      'baseline modules (react, react/jsx-runtime, react-dom, react-dom/client, @deepseek-ai/cordis, ' +
+      '@deepseek-ai/dsh-client-store, @deepseek-ai/dsh-client-ui-slots, @deepseek-ai/dsh-client-ui-primitives) ' +
+      'resolved from the shell frozen module table; dsh.client.inject = package dependency edges, ' +
+      'dsh.client.external = exact non-baseline module requests (recon vs task-board lib/client.js; ' +
+      'serving path verified live per TC-M0-10)',
+  },
+  bundlePatch: {
+    file: 'cordis.patch.yml',
+    rosterEntry: { insert: [{ id: 'api-client', name: 'dsh-api-client' }] },
+    patchReloadLive:
+      'dsh.profile.patchReload ("live" on profile web); `dsh plugin add` forwards to pnpm in the profile dir ' +
+      'then reconciles dsh.profile.bundles (recon: dsh CLI plugin-F7ZVfRyo.js). Live recompose remounts ' +
+      'plugins on config changes (verified: disabled-override hot-plug cycles, V-17) but never re-reads ' +
+      'Node-side module/manifest caches (U-5): host code and package.json edits require a process restart',
+  },
+}
+
+const outPath = join(repoRoot, 'fixtures', 'client-manifest-contract.json')
+mkdirSync(dirname(outPath), { recursive: true })
+writeFileSync(outPath, JSON.stringify(contract, null, 2) + '\n', 'utf8')
+console.log(`wrote ${outPath}`)

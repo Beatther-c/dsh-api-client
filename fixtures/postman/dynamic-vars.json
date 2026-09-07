@@ -1,0 +1,25 @@
+{
+  "info": {
+    "_postman_id": "f1a2b3c4-0006-4000-8000-000000000006",
+    "name": "dynamic-vars-collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "create-with-dynamic-vars",
+      "request": {
+        "method": "POST",
+        "url": "https://api.example.com/users/{{$guid}}",
+        "header": [
+          { "key": "X-Request-Id", "value": "{{$guid}}" },
+          { "key": "X-Sent-At", "value": "{{$timestamp}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"{{$randomEmail}}\",\"age\":{{$randomInt}}}",
+          "options": { "raw": { "language": "json" } }
+        }
+      }
+    }
+  ]
+}

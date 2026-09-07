@@ -1,0 +1,51 @@
+{
+  "info": {
+    "_postman_id": "f1a2b3c4-0004-4000-8000-000000000004",
+    "name": "scripts-collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "login-with-scripts",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const timestamp = Date.now();",
+              "pm.environment.set(\"request_timestamp\", timestamp);",
+              "globalThis.__pm_script_executed = (globalThis.__pm_script_executed || 0) + 1;"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 200\", function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "const body = pm.response.json();",
+              "pm.environment.set(\"session_token\", body.token);",
+              "globalThis.__pm_test_executed = (globalThis.__pm_test_executed || 0) + 1;"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "url": "https://api.example.com/login",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\":\"alice\",\"password\":\"s3cret\"}",
+          "options": { "raw": { "language": "json" } }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "dshVersion": "0.1.2-rc.1",
+  "capturedBy": [
+    "live runtime capture on the official shell (ui-sidebar): window.__DSH_API_CLIENT_PROBE__.snapshot()/spec()/entriesOfSlot() against the running web profile — full tree archived at docs/evidence/m0/slot-snapshot-official-shell.json",
+    "cordis_inspect cross-check (TC-M0-28): cordis_inspect_list/self work on the cordis agent preset (创造模式); cordis_inspect_query with a root param fails in the Client Slots inspect bridge ('\"input\" must be an object', 0.1.2-rc.1 bug) — occupant data comes from the client slots service, not the inspect bridge",
+    "static type-contract recon of the installed runtime (~/.dsh/profiles/web/node_modules): dsh-client-ui-layout / dsh-client-ui-conversation / dsh-client-ui-sidebar / dsh-client-ui-settings-plugins SlotMap declarations + dsh-client-ui-slots SlotCore semantics"
+  ],
+  "capturedAt": "2026-09-06T15:20:00.000Z",
+  "slots": [
+    {
+      "key": "root",
+      "cardinality": "single",
+      "scope": "root",
+      "ownerProps": {},
+      "occupants": [{ "id": "ui-layout AppFrame (runtime registrant label: H5)", "priority": 0 }],
+      "replacementRisk": "shadowing root removes every seat the frame declares (sidebar/conversation/details/shell.overlay) — do not register here (registry contract warning)"
+    },
+    {
+      "key": "conversation",
+      "cardinality": "single",
+      "scope": "session-maybe",
+      "ownerProps": {
+        "sessionId": "string | undefined (session-maybe standard suite per ui-session AGENTS: owner props = sessionId + useSession + useProjection; root-scoped seats get useSessions instead)",
+        "verified": "slot adapter received sessionId: \"session-02b380e4-…\" on activation (V-05); undefined in no-session state"
+      },
+      "occupants": [{ "id": "ui-conversation ConversationRoot (runtime registrant label: H5)", "priority": 0 }],
+      "replacementRisk": "replacement removes all child seats the occupant declares (conversation.session/composer/hero.*/input.*/composer.bar/session.header — full list in the evidence snapshot); replacement UNMOUNTS the official React tree but draft text + scroll survive in the DSH store layer and restore on yield (V-06); yield on session selection change is required (sessions.list.getSnapshot().current, spike fix #4/4b); lowest live priority wins the cell (our probe replaced at priority 0 vs H5@p0 — same priority last-writer wins, so mount ORDER decides; do not rely on it)"
+    },
+    {
+      "key": "settings.plugin.item",
+      "cardinality": "keyed",
+      "scope": "root",
+      "ownerProps": { "entryKey": "the settings namespace the card configures (renderSlot passes it per key)" },
+      "occupants": [
+        { "id": "dsh-market (key: dsh-market)", "priority": 0 },
+        { "id": "ui-shell (key: shell, registrant H5)", "priority": 0 },
+        { "id": "agent-loop (key: agent-loop, registrant H5)", "priority": 0 },
+        { "id": "subagent-model-selection (key: subagent-model-selection, registrant H5)", "priority": 0 },
+        { "id": "web-search-deepseek (key: web-search-deepseek, registrant H5)", "priority": 0 },
+        { "id": "univer-office (key: univer-office, registrant H5)", "priority": 0 },
+        { "id": "modsearch (key: modsearch, registrant H5)", "priority": 0 },
+        { "id": "dsh-api-client (key: api-client — this spike, verified V-09)", "priority": 0 }
+      ],
+      "replacementRisk": "additive per namespace key; same key + same priority throws — key on the plugin's own namespace ('api-client'). GATE (V-09): the ConfigurablePluginsTab only renders cards whose key matches a HOST-declared settings namespace (settings/describe mirror) — the client keyed registration alone is necessary but not sufficient; the host half must installSection/register the namespace (schemastery schema) or the card never renders"
+    },
+    {
+      "key": "sidebar.footer.action",
+      "cardinality": "list",
+      "scope": "root",
+      "ownerProps": { "collapsed": "boolean", "width": "number" },
+      "occupants": [{ "id": "cordis-panel (registrant H5)", "priority": 0 }],
+      "replacementRisk": "the only official additive sidebar seat (at the foot beside Settings); there is NO seat below New Session — that entry stays DOM injection (self-healing MutationObserver re-insert verified V-12). Under the codex-ui takeover shell this seat is declared by the codex-ui sidebar entry instead of ui-sidebar — shell-dependent"
+    },
+    {
+      "key": "sidebar",
+      "cardinality": "single",
+      "scope": "root",
+      "ownerProps": { "collapsed": "boolean (carried on a FRAME-LEVEL ancestor as data-sidebar-collapsed, not on the sidebar column — spike fix #7)", "width": "number (280 expanded / 56 rail collapsed)" },
+      "occupants": [{ "id": "ui-sidebar SidebarRoot (runtime registrant label: H5; michengai-codex-ui when the codex-ui takeover is enabled)", "priority": 0 }],
+      "replacementRisk": "replacing removes the workspace/settings seats the occupant declares — register into inner seats instead"
+    },
+    {
+      "key": "shell.overlay",
+      "cardinality": "list",
+      "scope": "root",
+      "ownerProps": {},
+      "occupants": [{ "id": "dsh-market-toast (registrant dsh-market)", "priority": 0 }],
+      "replacementRisk": "additive frame-wide floating layer; click-through until the entry opts into pointer events"
+    }
+  ]
+}
