@@ -60,6 +60,10 @@ pnpm test     # vitest：19 spec / 209 tests
 
 架构：`packages/core|shared|postman-adapter`（纯 TS，零 DSH import）+ `src/host`（Host API 28 端点 + 服务 + Agent 工具）+ `src/client`（dsh-adapter 双路径 + 视图/组件）。所有 DSH UI 内部契约只允许出现在 `dsh-adapter/` 与极薄 slot 注册层。
 
+### 开发规范
+
+智能体工作规范见 [AGENTS.md](AGENTS.md)；项目硬规范（红线/门禁/环境/决策）见 [PROJECT.md](PROJECT.md)；变更记录见 [CHANGELOG.md](CHANGELOG.md) 与 [docs/DEVLOG.md](docs/DEVLOG.md)；经验沉淀见 [knowledge-base/](knowledge-base/README.md)。
+
 ## Roadmap
 
 - **V0.1**（当前）：完整 API Client + Agent 工具 + Postman 导入 + 安全体系 + 兼容矩阵
