@@ -13,4 +13,5 @@
 
 <!-- 一行格式：- [主题标题](file-name.md) — 一句话钩子（解决什么问题 / 什么时候必读） -->
 
-（暂无条目）
+- [jsdom 焦点假绿](jsdom-focus-false-green.md) — focus() 可见性语义 + act() 时序反转两个机制让焦点类 jsdom 测试假绿；做任何菜单/对话框/drawer 焦点交互前必读。
+- [ego-browser 真实浏览器验收方法论](ego-browser-acceptance-methodology.md) — 选择器限定容器、React 受控驱动、CDP 拖动/视口模拟、滚动竞态、剪贴板捕获法、暗色模拟；跑浏览器验收前必读。
