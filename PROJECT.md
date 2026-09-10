@@ -15,7 +15,7 @@ Agent-native API Client for DeepSeek Harness（DSH）：Postman 级调试 UI + A
   - `packages/shared` — 共享类型与存储契约（SecretRef、storage-layout、tool-names）；
   - `packages/core` — 纯函数层（零 DSH import）：request build/body、auth apply、executor、security（SSRF 网络策略、redactor、sensitive-headers）、collection/environment/history 模型与操作、变量解析、import pipeline；
   - `packages/postman-adapter` — Postman v2.1 parse/detect/normalize/compat-scanner/migration report；
-  - `src/host` — file-store 文件存储、services（collection/environment/execution/history/import/profile/settings/secret-store/redaction/audit/network-policy）、Host API router（28 端点）、Agent tools；**Host 是权威数据源**，mutation 原子持久化；
+  - `src/host` — file-store 文件存储、services（collection/environment/execution/history/import/profile/settings/secret-store/redaction/audit/network-policy/tree-clipboard）、Host API router（基础 28 端点 + P0 新增 7：folders×3、tree/clipboard×4）、Agent tools；**Host 是权威数据源**，mutation 原子持久化；
   - `src/client` — dsh-adapter（feature-detect 双路径：官方 Slot 优先 + DOM fallback）、views/hooks/components/slots；DSH UI 内部契约只允许出现在 `dsh-adapter/` 与极薄 slot 注册层。
 
 ## 目录导览

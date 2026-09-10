@@ -43,7 +43,8 @@
   - 自动化：tsc 0 错误；vitest **30 spec / 558 tests 全绿**（基线 209 + 新增 349）；tsup 双入口 build 成功（client 310.11KB，grep undici=0）；architecture-boundary 全绿；
   - 真实浏览器（DSH 0.1.2-rc.1 web profile + ego-browser，证据 docs/evidence/p0/×4）：40+ 断言通过——hover 宽度差 0px、容器 706/705/526/525 临界 ±1px、拖动/双击/键盘精确调整+持久化 240→220→260+reload 恢复、全状态序列编辑器零重挂载、跨集合复制「副本」/剪切原子移动/Host 快照保留真实 Auth 材料、重命名树+tab+Host 三向同步、自动项计数随 Body 即时联动、suppression Save→reload→仍停用、用户 Content-Type 覆盖后 **wire 仅单条 text/css**、suppressed Accept **wire 零发送**、Query API Key 覆盖 wire 仅用户值、两个测试 token 全 DOM 扫描 0 命中、History 脱敏、host 日志零泄漏、暗色跟随（body 级 var 覆盖全组件+portal 菜单翻转）、删除级联空态回归；R1/R2/R3 回修后全部场景复验通过；
   - 环境还原：测试集合全部清理（9 集合基线）、侧栏复位 260、echo server 41234 保留运行。
-- **关联**：设计 docs/design/api-client-everyday-ux-p0-implementation-design.md（c58b1c3）；需求源 docs/superpowers/specs/2026-09-10-api-client-everyday-ux-design.md；治理初始化 40bc9ea；功能 bf5af48；KB：jsdom-focus-false-green、ego-browser-acceptance-methodology；GPT review 结论待 Stage 5 补记。
+- **关联**：设计 docs/design/api-client-everyday-ux-p0-implementation-design.md（c58b1c3）；需求源 docs/superpowers/specs/2026-09-10-api-client-everyday-ux-design.md；治理初始化 40bc9ea；功能 bf5af48；review 回修 loop1 057cf23 + loop2 d026616；KB：jsdom-focus-false-green、ego-browser-acceptance-methodology、frozen-contract-drift。
+- **Stage 5 review 结论（收口补记）**：GPT 全量 review（专用会话，经 GitHub 连接器拉代码）判定 R-01～R-12 共 12 项——6 项 P0-blocker（Cut409 清 token/菜单粘贴违矩阵/SecretRef 过早解析/旧 mutation memory-first/SaveModal 双状态机/cURL 删 Auth 结构）+ 2 项 P1 必修（draft-key 双 tab/Copy-Cut 假 stale）+ 2 项建议（PATCH 串行化/pointerId）+ 2 项记录；披露决策裁决 a/d/e/f 维持、b/c/g/h 修改。loop1 回修 11 项全过复审、R-08 残留（Cut 创建 409 须置 stale）loop2 定向回修后**最终判定：可发布，无需 loop3**（R-09 基线英文文案留 P1 治理项）。门禁终态：tsc 0 错、30 spec/589 tests 全绿、build 成功；真实浏览器复验 R-01/02/05/06/07/08 + cut409-stale 七场景全过。R-12（本文件端点计数）已修。
 
 ## 2026-09-10 · project-init 治理结构初始化
 
