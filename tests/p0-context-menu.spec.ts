@@ -17,6 +17,7 @@ import type { CollectionTreeHandlers } from '../src/client/components/collection
 import { TreeContextMenu, computeMenuPlacement } from '../src/client/components/collection/TreeContextMenu.tsx'
 import type { TreeMenuItem } from '../src/client/components/collection/TreeContextMenu.tsx'
 import type { CollectionsState, MutationOutcome } from '../src/client/hooks/useCollections.ts'
+import { useCollections } from '../src/client/hooks/useCollections.ts'
 import type { TreeClipboardApi, TreeClipboardBridge } from '../src/client/hooks/useTreeClipboard.ts'
 import { computePasteEnablement, useTreeClipboard } from '../src/client/hooks/useTreeClipboard.ts'
 import { TOKEN_GLOBAL_NAME } from '../src/client/hooks/useHostApi.ts'
@@ -307,11 +308,11 @@ describe('menu_matrix_by_node_kind：四种目标动作矩阵逐字（AC-08）',
     expect(menuItem('cut')).toBeNull()
   })
 
-  it('Request = 打开 / 重命名 / 复制 / 剪切 / 粘贴到所属容器之后 / 复制 URL / 复制为 cURL / 删除', async () => {
+  it('Request = 打开 / 重命名 / 复制 / 剪切 / 粘贴到此请求之后 / 复制 URL / 复制为 cURL / 删除', async () => {
     await renderTree()
     await expandC1()
     await contextMenuOn(row('request:r1'))
-    expect(menuLabels()).toEqual(['打开', '重命名', '复制', '剪切', '粘贴到所属容器之后', '复制 URL', '复制为 cURL', '删除'])
+    expect(menuLabels()).toEqual(['打开', '重命名', '复制', '剪切', '粘贴到此请求之后', '复制 URL', '复制为 cURL', '删除'])
     // 分组分隔线：open | edit | clipboard | export | danger
     expect(document.body.querySelectorAll('[data-dsh-api-client="tree-menu-separator"]')).toHaveLength(4)
     menuItems().forEach((item) => expect(item.getAttribute('role')).toBe('menuitem'))
@@ -416,13 +417,28 @@ describe('pasteEnablement：§6.5 静态矩阵与中文原因', () => {
     expect(menuElement()).toBeNull()
   })
 
-  it('Request 菜单「粘贴到所属容器之后」：顶层 Request → 所属 Collection 目标', async () => {
-    const { clipboard } = await renderTree({ clipboard: clipboardDescriptor({ operation: 'copy', kind: 'request' }) })
+  it('R-02：Request 菜单「粘贴到此请求之后」→ 目标 = 该 Request 自身（插在其后，§4.6 冻结矩阵），与键盘 Cmd+V 路径一致', async () => {
+    // ≥3 个 sibling 的容器、锚点取中间 r3：targetKind:'request' 的语义按冻结矩阵 =
+    // 「插在目标 Request 之后」（新节点紧跟锚点而非容器末尾——插入位置本身归 Host
+    // 契约，p0-host-tree-api.spec 已验证；client 侧断言入参正确且鼠标/键盘一致）。
+    const wide = fixture()
+    wide[0]!.requests = [makeRequest('r1', '订单列表'), makeRequest('r3', '订单详情'), makeRequest('r4', '订单取消')]
+    const { clipboard } = await renderTree({
+      collections: { collections: wide },
+      clipboard: clipboardDescriptor({ operation: 'copy', kind: 'request' }),
+    })
     await expandC1()
-    await contextMenuOn(row('request:r1'))
+    await contextMenuOn(row('request:r3'))
+    expect(menuLabels()).toContain('粘贴到此请求之后')
     await clickMenuItem('paste')
     await flushMicrotasks()
-    expect(vi.mocked(clipboard.paste)).toHaveBeenCalledWith({ kind: 'collection', targetId: 'c1', targetCollectionId: 'c1', expectedTargetCollectionUpdatedAt: 1000 })
+    const expectedTarget = { kind: 'request', targetId: 'r3', targetCollectionId: 'c1', expectedTargetCollectionUpdatedAt: 1000 }
+    expect(vi.mocked(clipboard.paste)).toHaveBeenCalledWith(expectedTarget)
+    // 键盘 Cmd+V 同节点同入参（修复前：菜单走容器末尾目标、键盘走 request 目标——同一节点两种数据结果）。
+    await pressKey(row('request:r3'), 'v', { metaKey: true })
+    await act(async () => {})
+    expect(vi.mocked(clipboard.paste)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(clipboard.paste)).toHaveBeenLastCalledWith(expectedTarget)
   })
 })
 
@@ -937,12 +953,29 @@ describe('useTreeClipboard（mock fetch）：四字段状态、Cut 源删除清�
     return null
   }
 
+  let capturedCollections: CollectionsState | undefined
+
+  /** R-08 回归：真实 useCollections × 真实 useTreeClipboard（WP8 接线同形态）。 */
+  function CombinedHarness(): null {
+    const collections = useCollections()
+    capturedCollections = collections
+    captured = useTreeClipboard({ runMutation: collections.runMutation })
+    return null
+  }
+
+  async function renderCombinedHook(): Promise<void> {
+    await act(async () => {
+      root.render(createElement(CombinedHarness))
+    })
+  }
+
   beforeEach(() => {
     calls = []
     fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     ;(globalThis as Record<string, unknown>)[TOKEN_GLOBAL_NAME] = { base: '/api-client', token: 'test-token' }
     captured = undefined
+    capturedCollections = undefined
   })
 
   afterEach(() => {
@@ -1051,10 +1084,52 @@ describe('useTreeClipboard（mock fetch）：四字段状态、Cut 源删除清�
     expect(toastMocks.info).toHaveBeenCalledWith('粘贴完成')
   })
 
-  it('Cut paste 409：token 清空 + 中文提示引导重新剪切（409 后永远无法再成功）', async () => {
+  it('R-01：Cut paste 目标版本 409 → token 保留（Host §3.1.1 不消费），刷新后同 token 重试成功并消费', async () => {
+    let pasteCount = 0
     routeFetch([
       ...cutRoutes,
-      [/POST .*\/tree\/clipboard\/tk-cut\/paste$/, () => mockResponse(409, { error: { code: 'version-conflict', message: '数据已被其他操作修改，请刷新后重试' } })],
+      [
+        /POST .*\/tree\/clipboard\/tk-cut\/paste$/,
+        () => {
+          pasteCount += 1
+          // 第一次：目标 Collection 版本冲突（可恢复——刷新后换新 expected 重试）；第二次：成功。
+          return pasteCount === 1
+            ? mockResponse(409, { error: { code: 'version-conflict', message: '数据已被其他操作修改，请刷新后重试' } })
+            : mockResponse(200, { operation: 'cut', kind: 'request', consumed: true })
+        },
+      ],
+    ])
+    await renderHook()
+    await performCut()
+    let pasted = true
+    await act(async () => {
+      pasted = await captured!.paste({ kind: 'collection', targetId: 'c2', targetCollectionId: 'c2', expectedTargetCollectionUpdatedAt: 2000 })
+    })
+    expect(pasted).toBe(false)
+    // 409 一律保留 token（修复前：误清空 + 「请重新剪切」，把可恢复的目标冲突打成不可恢复态）。
+    expect(captured!.clipboard?.token).toBe('tk-cut')
+    expect(toastMocks.info).not.toHaveBeenCalledWith('剪切内容已无法粘贴，请重新剪切')
+    // 刷新（§4.9 stale 流程归真实 runMutation——本 fake bridge 不触发）后以新 expected 重试：同 token 成功且 consumed → 本地清空。
+    await act(async () => {
+      pasted = await captured!.paste({ kind: 'collection', targetId: 'c2', targetCollectionId: 'c2', expectedTargetCollectionUpdatedAt: 2001 })
+    })
+    expect(pasted).toBe(true)
+    expect(captured!.clipboard).toBeUndefined()
+    const pasteCalls = calls.filter((call) => call.url.includes('/tk-cut/paste'))
+    expect(pasteCalls).toHaveLength(2)
+    expect(pasteCalls[0]!.url).toBe(pasteCalls[1]!.url) // 同一 token
+    expect(JSON.parse(String(pasteCalls[1]!.init?.body))).toEqual({
+      targetKind: 'collection',
+      targetId: 'c2',
+      targetCollectionId: 'c2',
+      expectedTargetCollectionUpdatedAt: 2001,
+    })
+  })
+
+  it('R-01：Cut paste 源已被外部删除（404 request-not-found）→ 按 §0.3 清空 token + 中文提示', async () => {
+    routeFetch([
+      ...cutRoutes,
+      [/POST .*\/tree\/clipboard\/tk-cut\/paste$/, () => mockResponse(404, { error: { code: 'request-not-found', message: 'request not found: r1' } })],
     ])
     await renderHook()
     await performCut()
@@ -1064,7 +1139,7 @@ describe('useTreeClipboard（mock fetch）：四字段状态、Cut 源删除清�
     })
     expect(pasted).toBe(false)
     expect(captured!.clipboard).toBeUndefined()
-    expect(toastMocks.info).toHaveBeenCalledWith('剪切内容已无法粘贴，请重新剪切')
+    expect(toastMocks.info).toHaveBeenCalledWith('剪切来源已被删除，剪贴板已清空')
   })
 
   it('paste 404 clipboard-not-found（Host 重启/过期）→ 本地同步清空', async () => {
@@ -1105,5 +1180,84 @@ describe('useTreeClipboard（mock fetch）：四字段状态、Cut 源删除清�
     })
     expect(captured!.clipboard).toBeUndefined()
     expect(calls.some((call) => call.method === 'DELETE' && call.url.includes('/tree/clipboard/tk-cut'))).toBe(true)
+  })
+
+  it('R-08：copy 成功 → 零 GET /collections、不置 stale（只建 Host 内存 clipboard entry）', async () => {
+    let getCount = 0
+    routeFetch([
+      [
+        /GET .*\/collections$/,
+        () => {
+          getCount += 1
+          // 「GET 失败不产生 stale」的更强形态：copy 后若仍发起刷新，这里直接抛错——
+          // 修复前的 runMutation 路径会吃到该失败并置 stale=true，下方断言即红。
+          if (getCount > 1) throw new Error('copy 后不应刷新投影')
+          return mockResponse(200, fixture())
+        },
+      ],
+      [/POST .*\/tree\/clipboard\/copy$/, () => mockResponse(200, { token: 'tk-copy', operation: 'copy', kind: 'collection', expiresAt: Date.now() + 1_800_000 })],
+    ])
+    await renderCombinedHook()
+    expect(getCount).toBe(1) // 仅初始加载
+    let copied = false
+    await act(async () => {
+      copied = await captured!.copy({ kind: 'collection', collectionId: 'c1' })
+    })
+    expect(copied).toBe(true)
+    expect(getCount).toBe(1) // copy 后零刷新
+    expect(capturedCollections!.stale).toBe(false)
+    expect(captured!.clipboard?.token).toBe('tk-copy')
+    expect(toastMocks.info).toHaveBeenCalledWith('已复制，可粘贴到目标位置')
+  })
+
+  it('R-08：cut 源版本 409 → Host 逐字冲突文案，不置 stale、零额外 GET', async () => {
+    let getCount = 0
+    routeFetch([
+      [
+        /GET .*\/collections$/,
+        () => {
+          getCount += 1
+          return mockResponse(200, fixture())
+        },
+      ],
+      [/POST .*\/tree\/clipboard\/cut$/, () => mockResponse(409, { error: { code: 'version-conflict', message: '数据已被其他操作修改，请刷新后重试' } })],
+    ])
+    await renderCombinedHook()
+    let cut = true
+    await act(async () => {
+      cut = await captured!.cut({ requestId: 'r1', requestUpdatedAt: 100, sourceCollectionUpdatedAt: 1000 })
+    })
+    expect(cut).toBe(false)
+    expect(captured!.clipboard).toBeUndefined()
+    expect(toastMocks.error).toHaveBeenCalledWith('数据已被其他操作修改，请刷新后重试')
+    expect(capturedCollections!.stale).toBe(false) // 修复前：runMutation 把 clipboard 409 打成树 stale，阻断后续 paste
+    expect(getCount).toBe(1)
+  })
+
+  it('R-08 对照：paste 仍走 runMutation——成功后刷新投影（第二次 GET），copy 后不刷新', async () => {
+    let getCount = 0
+    routeFetch([
+      [
+        /GET .*\/collections$/,
+        () => {
+          getCount += 1
+          return mockResponse(200, fixture())
+        },
+      ],
+      [/POST .*\/tree\/clipboard\/copy$/, () => mockResponse(200, { token: 'tk-copy', operation: 'copy', kind: 'request', expiresAt: Date.now() + 1_800_000 })],
+      [/POST .*\/tree\/clipboard\/tk-copy\/paste$/, () => mockResponse(200, { operation: 'copy', kind: 'request', consumed: false })],
+    ])
+    await renderCombinedHook()
+    await act(async () => {
+      await captured!.copy({ kind: 'request', collectionId: 'c1', nodeId: 'r1' })
+    })
+    expect(getCount).toBe(1)
+    let pasted = false
+    await act(async () => {
+      pasted = await captured!.paste({ kind: 'folder', targetId: 'f1', targetCollectionId: 'c1', expectedTargetCollectionUpdatedAt: 1000 })
+    })
+    expect(pasted).toBe(true)
+    expect(getCount).toBe(2) // paste 成功 → §4.9 刷新
+    expect(capturedCollections!.stale).toBe(false)
   })
 })

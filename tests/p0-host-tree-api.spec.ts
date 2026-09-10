@@ -1525,3 +1525,129 @@ describe('suppressedGeneratedHeaders 与 PATCH name 校验（实施设计 §3.2/
     expect((untouched.body as RequestShape).suppressedGeneratedHeaders).toEqual([{ name: 'content-type', source: 'body' }])
   })
 })
+
+// ===========================================================================
+// 9. R-04 回归：write-first 统一提交（§4.4 普遍化 / PROJECT.md 红线 2）
+//    普通 mutation 写盘失败 → API 报错、内存权威态与磁盘文件都保持原状、
+//    后续 GET 返回旧数据、恢复后同操作（同版本号）成功。
+// ===========================================================================
+
+describe('R-04 write-first：普通 mutation 写盘失败不污染内存权威态', () => {
+  it('Folder 创建写盘失败：API 500、内存/磁盘原状、后续 GET 返回旧数据、恢复后同版本重试成功', async () => {
+    const collectionId = await createCollection('r04-建夹')
+    const before = await getCollection(collectionId)
+    const fileBefore = readCollectionsFile()
+    const body = { name: '失败夹', expectedCollectionUpdatedAt: before.updatedAt }
+
+    const spy = vi.spyOn(services.store, 'writeJson').mockImplementationOnce(() => {
+      throw new Error('wp3 R-04 模拟磁盘写失败')
+    })
+    const failed = await mutate(`/api-client/collections/${collectionId}/folders`, 'POST', body)
+    expect(failed.status).toBe(500)
+    spy.mockRestore()
+
+    // 内存权威态未被污染：GET（读内存）返回旧数据，folder 未出现、版本未前移。
+    expect(await getCollection(collectionId)).toEqual(before)
+    expect(services.collections.list().find((c) => c.id === collectionId)).toMatchObject({
+      updatedAt: before.updatedAt,
+      folders: [],
+    })
+    // 磁盘保持原状（写失败发生在任何 fs 写入之前）。
+    expect(readCollectionsFile()).toEqual(fileBefore)
+
+    // 恢复后同操作、同版本号成功——失败未消耗/前移乐观锁版本。
+    const retry = await mutate(`/api-client/collections/${collectionId}/folders`, 'POST', body)
+    expect(retry.status).toBe(200)
+    expect((await getCollection(collectionId)).folders.map((f) => f.name)).toEqual(['失败夹'])
+  })
+
+  it('Folder 重命名写盘失败：500、旧名与版本保持、恢复后同版本重试成功', async () => {
+    const collectionId = await createCollection('r04-改名夹')
+    const folder = await createFolderIn(collectionId, '旧名')
+    const before = await getCollection(collectionId)
+    const fileBefore = readCollectionsFile()
+    const body = { name: '新名', expectedCollectionUpdatedAt: before.updatedAt }
+
+    const spy = vi.spyOn(services.store, 'writeJson').mockImplementationOnce(() => {
+      throw new Error('wp3 R-04 模拟磁盘写失败')
+    })
+    const failed = await mutate(`/api-client/collections/${collectionId}/folders/${folder.id}`, 'PATCH', body)
+    expect(failed.status).toBe(500)
+    spy.mockRestore()
+
+    expect(await getCollection(collectionId)).toEqual(before)
+    expect(readCollectionsFile()).toEqual(fileBefore)
+
+    const retry = await mutate(`/api-client/collections/${collectionId}/folders/${folder.id}`, 'PATCH', body)
+    expect(retry.status).toBe(200)
+    expect((await getCollection(collectionId)).folders[0]!.name).toBe('新名')
+  })
+
+  it('Folder 删除写盘失败：500、folder 及其子内容保持、恢复后同版本重试成功', async () => {
+    const collectionId = await createCollection('r04-删夹')
+    const folder = await createFolderIn(collectionId, '待删')
+    await addRequestTo(collectionId, { name: '夹内请求', folderId: folder.id })
+    const before = await getCollection(collectionId)
+    const fileBefore = readCollectionsFile()
+    const body = { expectedCollectionUpdatedAt: before.updatedAt }
+
+    const spy = vi.spyOn(services.store, 'writeJson').mockImplementationOnce(() => {
+      throw new Error('wp3 R-04 模拟磁盘写失败')
+    })
+    const failed = await mutate(`/api-client/collections/${collectionId}/folders/${folder.id}`, 'DELETE', body)
+    expect(failed.status).toBe(500)
+    spy.mockRestore()
+
+    expect(await getCollection(collectionId)).toEqual(before)
+    expect(readCollectionsFile()).toEqual(fileBefore)
+
+    const retry = await mutate(`/api-client/collections/${collectionId}/folders/${folder.id}`, 'DELETE', body)
+    expect(retry.status).toBe(204)
+    expect((await getCollection(collectionId)).folders).toEqual([])
+  })
+
+  it('Request 删除写盘失败：500、请求仍在树上、磁盘原状、重试成功', async () => {
+    const collectionId = await createCollection('r04-删请求')
+    const created = await addRequestTo(collectionId, { name: '待删请求', url: 'https://wp3/r04-del' })
+    const requestId = (created.body as RequestShape).id
+    const before = await getCollection(collectionId)
+    const fileBefore = readCollectionsFile()
+
+    const spy = vi.spyOn(services.store, 'writeJson').mockImplementationOnce(() => {
+      throw new Error('wp3 R-04 模拟磁盘写失败')
+    })
+    const failed = await mutate(`/api-client/requests/${requestId}`, 'DELETE')
+    expect(failed.status).toBe(500)
+    spy.mockRestore()
+
+    expect(await getCollection(collectionId)).toEqual(before)
+    expect(findRequestShape(await getCollection(collectionId), requestId)).toBeDefined()
+    expect(readCollectionsFile()).toEqual(fileBefore)
+
+    const retry = await mutate(`/api-client/requests/${requestId}`, 'DELETE')
+    expect(retry.status).toBe(204)
+    expect(findRequestShape(await getCollection(collectionId), requestId)).toBeUndefined()
+  })
+
+  it('Request 重命名（PATCH）写盘失败：500、旧名与版本保持、重试成功', async () => {
+    const collectionId = await createCollection('r04-改请求')
+    const created = await addRequestTo(collectionId, { name: '请求旧名' })
+    const requestId = (created.body as RequestShape).id
+    const before = await getCollection(collectionId)
+    const fileBefore = readCollectionsFile()
+
+    const spy = vi.spyOn(services.store, 'writeJson').mockImplementationOnce(() => {
+      throw new Error('wp3 R-04 模拟磁盘写失败')
+    })
+    const failed = await mutate(`/api-client/requests/${requestId}`, 'PATCH', { name: '请求新名' })
+    expect(failed.status).toBe(500)
+    spy.mockRestore()
+
+    expect(await getCollection(collectionId)).toEqual(before)
+    expect(readCollectionsFile()).toEqual(fileBefore)
+
+    const retry = await mutate(`/api-client/requests/${requestId}`, 'PATCH', { name: '请求新名' })
+    expect(retry.status).toBe(200)
+    expect((retry.body as RequestShape).name).toBe('请求新名')
+  })
+})

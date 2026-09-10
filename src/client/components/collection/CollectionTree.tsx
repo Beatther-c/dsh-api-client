@@ -318,20 +318,6 @@ export function CollectionTree(props: CollectionTreeProps): ReactElement {
     return { kind: 'request', targetId: row.nodeId, targetCollectionId: row.collectionId, expectedTargetCollectionUpdatedAt: row.collection.updatedAt }
   }
 
-  /** Request 菜单「粘贴到所属容器之后」：目标 = 所属 Folder（顶层 Request 则所属 Collection）。 */
-  const containerTargetForRequest = (row: ProjectedTreeNode): PasteTarget => {
-    const parentKey = row.parentKey ?? ''
-    if (parentKey.startsWith('folder:')) {
-      return {
-        kind: 'folder',
-        targetId: parentKey.slice('folder:'.length),
-        targetCollectionId: row.collectionId,
-        expectedTargetCollectionUpdatedAt: row.collection.updatedAt,
-      }
-    }
-    return { kind: 'collection', targetId: row.collectionId, targetCollectionId: row.collectionId, expectedTargetCollectionUpdatedAt: row.collection.updatedAt }
-  }
-
   const pasteTo = async (target: PasteTarget, rowKey: string | undefined): Promise<void> => {
     if (stale) {
       toast.error(STALE_REASON)
@@ -487,8 +473,10 @@ export function CollectionTree(props: CollectionTreeProps): ReactElement {
       withStaleGate({ id: 'rename', label: '重命名', group: 'edit', onRun: async () => startRename(row.key) }),
       { id: 'copy', label: '复制', group: 'clipboard', onRun: () => copyNode(row) },
       { id: 'cut', label: '剪切', group: 'clipboard', onRun: async () => cutNode(row) },
-      // UX §4.4 冻结矩阵逐字：Request 的粘贴项 = 「粘贴到所属容器之后」（目标 = 所属容器）。
-      { ...buildPasteItem(containerTargetForRequest(row), row.key), label: '粘贴到所属容器之后' },
+      // R-02（GPT review 裁决 b）：Request 作为粘贴目标 = 插在该 Request 之后（§4.6
+      // 冻结矩阵）——菜单与键盘 Cmd+V 同走 pasteTargetForRow，鼠标/键盘对同一节点
+      // 产生同一数据结果；文案「粘贴到此请求之后」。
+      { ...buildPasteItem(pasteTargetForRow(row), row.key), label: '粘贴到此请求之后' },
       { id: 'copy-url', label: '复制 URL', group: 'export', onRun: () => copyRequestText(row, 'url') },
       { id: 'copy-curl', label: '复制为 cURL', group: 'export', onRun: () => copyRequestText(row, 'curl') },
       withStaleGate({ id: 'delete', label: '删除', group: 'danger', danger: true, onRun: async () => requestDelete(row) }),

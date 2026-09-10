@@ -324,6 +324,103 @@ describe('§5.5：Auth 修复——不再无条件 append', () => {
   })
 })
 
+describe('R-03 回归（GPT review P0-blocker）：Auth materialize 不得先于覆盖判定', () => {
+  it('enabled 用户 Authorization 覆盖 → resolveSecret 零调用、零 trace（低优先级 Auth 不反向阻断高优先级用户配置）', async () => {
+    const resolveSecret = vi.fn(() => BEARER_SECRET)
+    const plan = await buildRequestPlan(
+      req({
+        auth: { type: 'bearer', token: createSecretRef('r03-ref') },
+        headers: [{ key: 'Authorization', value: 'Bearer user-wins', enabled: true }],
+      }),
+      { mode: 'resolved', resolveSecret },
+    )
+    expect(resolveSecret).not.toHaveBeenCalled()
+    expect(item(plan, 'Authorization').status).toBe('overridden')
+    expect(plan.resolved.secretValueTraces).toEqual([])
+    expect(plan.resolved.headers.filter((h) => h.key.toLowerCase() === 'authorization')).toEqual([
+      { key: 'Authorization', value: 'Bearer user-wins', enabled: true },
+    ])
+  })
+
+  it('失效 SecretRef（resolveSecret 必抛）+ enabled 用户覆盖 → 构建仍成功，wire 只有用户值', async () => {
+    const failing = vi.fn((): string => {
+      throw new Error('dangling secret ref: r03-dead-ref')
+    })
+    const plan = await buildRequestPlan(
+      req({
+        auth: { type: 'bearer', token: createSecretRef('r03-dead-ref') },
+        headers: [{ key: 'authorization', value: 'Bearer user-wins', enabled: true }],
+      }),
+      { mode: 'resolved', resolveSecret: failing },
+    )
+    expect(failing).not.toHaveBeenCalled()
+    expect(plan.resolved.headers.filter((h) => h.key.toLowerCase() === 'authorization')).toEqual([
+      { key: 'authorization', value: 'Bearer user-wins', enabled: true },
+    ])
+  })
+
+  it('disabled 用户行 → 不构成覆盖，SecretRef 正常解析（调用次数=1 + trace 记录）', async () => {
+    const resolveSecret = vi.fn(() => BEARER_SECRET)
+    const plan = await buildRequestPlan(
+      req({
+        auth: { type: 'bearer', token: createSecretRef('r03-active-ref') },
+        headers: [{ key: 'Authorization', value: 'Bearer off', enabled: false }],
+      }),
+      { mode: 'resolved', resolveSecret },
+    )
+    expect(resolveSecret).toHaveBeenCalledTimes(1)
+    expect(item(plan, 'Authorization').status).toBe('active')
+    expect(plan.resolved.headers).toContainEqual({
+      key: 'Authorization',
+      value: `Bearer ${BEARER_SECRET}`,
+      enabled: true,
+    })
+    expect(plan.resolved.secretValueTraces).toEqual([{ location: 'auth', key: 'token', secretRef: 'r03-active-ref' }])
+  })
+
+  it('Query API Key 同理：enabled 同名用户参数 → 零解析零 trace，失效 SecretRef 不阻断构建', async () => {
+    const failing = vi.fn((): string => {
+      throw new Error('dangling secret ref: r03-query-dead')
+    })
+    const plan = await buildRequestPlan(
+      req({
+        auth: { type: 'apikey', key: 'api_key', value: createSecretRef('r03-query-dead'), in: 'query' },
+        params: [{ key: 'api_key', value: 'user-val', enabled: true }],
+      }),
+      { mode: 'resolved', resolveSecret: failing },
+    )
+    expect(failing).not.toHaveBeenCalled()
+    expect(plan.preview.query[0]?.status).toBe('overridden')
+    expect(plan.resolved.url).toBe('https://api.example.com/x?api_key=user-val')
+    expect(plan.resolved.secretValueTraces).toEqual([])
+  })
+
+  it('apikey in header：enabled 用户同名（大小写不同拼写）→ 零解析；disabled → 正常解析', async () => {
+    const resolveSecret = vi.fn(() => QUERY_SECRET)
+    const overriddenPlan = await buildRequestPlan(
+      req({
+        auth: { type: 'apikey', key: 'X-API-Key', value: createSecretRef('r03-hk-ref'), in: 'header' },
+        headers: [{ key: 'x-api-key', value: 'user-key', enabled: true }],
+      }),
+      { mode: 'resolved', resolveSecret },
+    )
+    expect(resolveSecret).not.toHaveBeenCalled()
+    expect(item(overriddenPlan, 'X-API-Key').status).toBe('overridden')
+    expect(overriddenPlan.resolved.secretValueTraces).toEqual([])
+
+    const activePlan = await buildRequestPlan(
+      req({
+        auth: { type: 'apikey', key: 'X-API-Key', value: createSecretRef('r03-hk-ref'), in: 'header' },
+        headers: [{ key: 'x-api-key', value: 'off', enabled: false }],
+      }),
+      { mode: 'resolved', resolveSecret },
+    )
+    expect(resolveSecret).toHaveBeenCalledTimes(1)
+    expect(activePlan.resolved.headers).toContainEqual({ key: 'X-API-Key', value: QUERY_SECRET, enabled: true })
+    expect(activePlan.resolved.secretValueTraces).toEqual([{ location: 'auth', key: 'X-API-Key', secretRef: 'r03-hk-ref' }])
+  })
+})
+
 describe('§5.6：Query API Key——独立于 Header 的冲突规则', () => {
   const auth = { type: 'apikey', key: 'api_key', value: QUERY_SECRET, in: 'query' } as const
 
@@ -378,7 +475,7 @@ describe('§5.6：Query API Key——独立于 Header 的冲突规则', () => {
     expect(disabledOnly.resolved.url).toBe(`https://api.example.com/x?api_key=${QUERY_SECRET}`)
   })
 
-  it('query 名大小写敏感精确比较（RFC 3986 无大小写折叠）：API_KEY 不覆盖 api_key', async () => {
+  it('query 名不主动 case-fold（URI 标准未赋予 query 参数名类似 Header 的 case-insensitive 语义）：API_KEY 不覆盖 api_key', async () => {
     const plan = await buildRequestPlan(
       req({ auth, params: [{ key: 'API_KEY', value: 'upper', enabled: true }] }),
       { mode: 'resolved' },
@@ -724,7 +821,7 @@ describe('§5.10：安全 cURL', () => {
     expect(posixShellQuote(`abc'def`)).toBe(`'abc'\\''def'`)
   })
 
-  it('包含 method/URL/enabled 用户 Header/Body/active 安全自动项；disabled 行与 Auth 派生项不进', () => {
+  it('包含 method/URL/enabled 用户 Header/Body/active 安全自动项；disabled 行不进；Auth 派生项以 <redacted> 结构输出（R-06）', () => {
     const curl = buildCurlCommand(
       req({
         method: 'POST',
@@ -743,8 +840,9 @@ describe('§5.10：安全 cURL', () => {
     expect(curl).toContain(`--data-raw '{"a":1}'`)
     expect(curl).toContain(`-H 'Content-Type: application/json'`)
     expect(curl).toContain(`-H 'Accept: */*'`)
-    // Auth 派生项不进 cURL（§5.10「安全可复制的自动项」；P0 不提供复制已解析 secret 的 cURL）
-    expect(curl).not.toContain('Authorization')
+    // R-06（GPT review 裁决 c）：§5.10「必须 redacted」= 值替换为 <redacted>，不是删除结构——
+    // 与 Query API Key 的 api_key=<redacted> 形态对称；P0 仍不提供复制已解析 secret 的 cURL。
+    expect(curl).toContain(`-H 'Authorization: <redacted>'`)
     expect(curl).not.toContain(BEARER_SECRET)
   })
 
@@ -821,5 +919,69 @@ describe('§5.10：安全 cURL', () => {
     const raw = buildCurlCommand(req({ method: 'POST', body: { type: 'raw', raw: 'plain text' } }))
     expect(raw).toContain(`--data-raw 'plain text'`)
     expect(raw).toContain(`-H 'Content-Type: text/plain'`)
+  })
+})
+
+describe('R-06 回归（GPT review 裁决 c）：cURL Auth 派生项保留结构、值恒 <redacted>', () => {
+  it('apikey in header → -H \'<API-Key-Name（用户拼写）>: <redacted>\'；全程零 SecretRef 解析、输出无 ref/材料/preview 遮罩', () => {
+    const curl = buildCurlCommand(
+      req({ auth: { type: 'apikey', key: 'X-API-Key', value: createSecretRef('r06-ref'), in: 'header' } }),
+    )
+    expect(curl).toContain(`-H 'X-API-Key: <redacted>'`)
+    expect(curl).not.toContain('r06-ref')
+    // cURL 的 secret 占位统一 <redacted>（§5.10），不使用 preview 遮罩形态
+    expect(curl).not.toContain(SECRET_VALUE_PREVIEW)
+  })
+
+  it('basic → Authorization 结构保留、值 <redacted>；username 不进 cURL', () => {
+    const curl = buildCurlCommand(
+      req({ auth: { type: 'basic', username: 'alice', password: createSecretRef('r06-basic') } }),
+    )
+    expect(curl).toContain(`-H 'Authorization: <redacted>'`)
+    expect(curl).not.toContain('alice')
+    expect(curl).not.toContain('r06-basic')
+  })
+
+  it('被用户 Header 覆盖时只输出用户行的安全版本：Authorization 恰出现一次且为 <redacted>', () => {
+    const curl = buildCurlCommand(
+      req({
+        auth: { type: 'bearer', token: BEARER_SECRET },
+        headers: [{ key: 'Authorization', value: `Bearer ${BEARER_SECRET}`, enabled: true }],
+      }),
+    )
+    expect(curl.match(/Authorization/g)).toHaveLength(1)
+    expect(curl).toContain(`-H 'Authorization: <redacted>'`)
+    expect(curl).not.toContain(BEARER_SECRET)
+  })
+
+  it('apikey in query → Header 区无 Auth 条目，URL 保留 api_key=<redacted> 结构（与 Header 形态对称）', () => {
+    const curl = buildCurlCommand(
+      req({ auth: { type: 'apikey', key: 'api_key', value: createSecretRef('r06-q-ref'), in: 'query' } }),
+    )
+    expect(curl).toContain(`'https://api.example.com/x?api_key=<redacted>'`)
+    expect(curl).not.toContain(`-H 'api_key`)
+    expect(curl).not.toContain('r06-q-ref')
+  })
+
+  it('auth none → 无 Auth 条目；inherit → 经 collection 链得出目标名后同样 <redacted>', () => {
+    const none = buildCurlCommand(req({}))
+    expect(none).not.toContain('Authorization')
+    const inherited = buildCurlCommand(
+      req({ auth: { type: 'inherit' } }),
+      {
+        collection: {
+          id: 'c1',
+          name: 'c',
+          auth: { type: 'bearer', token: createSecretRef('r06-inh-ref') },
+          variables: [],
+          folders: [],
+          requests: [],
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      },
+    )
+    expect(inherited).toContain(`-H 'Authorization: <redacted>'`)
+    expect(inherited).not.toContain('r06-inh-ref')
   })
 })

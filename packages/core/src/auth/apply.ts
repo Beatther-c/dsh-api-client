@@ -18,7 +18,13 @@
  */
 import type { AuthConfig, ResolvedRequest } from '@dsh-api-client/shared'
 import type { SecretResolver } from '../request/plan.ts'
-import { materializeAuthContribution, mergeContributions } from '../request/plan.ts'
+import {
+  authContributionTarget,
+  isAuthQueryOverriddenByUser,
+  isOverriddenByUserHeaders,
+  materializeAuthContribution,
+  mergeContributions,
+} from '../request/plan.ts'
 import { buildUrl, urlToParams } from '../request/build.ts'
 
 export interface ApplyAuthDeps {
@@ -29,17 +35,35 @@ export interface ApplyAuthDeps {
  * 把（已解析 inherit 链的）AuthConfig 应用到 ResolvedRequest（兼容 wrapper）：
  * 返回新对象，headers/url 落定，secret 来源追加到 secretValueTraces。
  * 注意：调用前必须经 resolveInheritedAuth 消解 'inherit'（未消解时本函数抛错，
- * 与历史行为一致）。
+ * 消息与历史行为逐字一致）。
+ *
+ * R-03 追加（orchestrator 授权）：与 buildRequestPlan 同款惰性 materialize——
+ * 先由 Auth 类型得出目标名称/位置（authContributionTarget，零解析），再用与
+ * mergeContributions 同源的谓词（isOverriddenByUserHeaders / §5.6 Query 判定）
+ * 判覆盖；被覆盖路径零 resolveSecret 调用、零 trace，失效 SecretRef 不反向阻断。
  */
 export async function applyAuth(
   auth: AuthConfig,
   resolved: ResolvedRequest,
   deps?: ApplyAuthDeps,
 ): Promise<ResolvedRequest> {
-  // P0 §5.5：不再无条件 append——与 buildRequestPlan 走同一 mergeContributions。
+  // inherit 未消解 → authContributionTarget 抛错（消息逐字兼容旧 applyAuth）。
+  const target = authContributionTarget(auth)
   // resolved.headers 即本 wrapper 视角的「用户 Header」全集（其中已含上游
   // resolveRequest 自动补的 Content-Type/Accept，同名 Auth 贡献同样被覆盖）。
-  const materialized = await materializeAuthContribution(auth, 'resolved', deps?.resolveSecret)
+  const enabledUserHeaderNames = new Set(
+    resolved.headers.filter((h) => h.enabled && h.key !== '').map((h) => h.key.toLowerCase()),
+  )
+  // §5.6：URL 文本中已有的 query 参数即「用户参数」（恒视为 enabled）。
+  const userQueryKeys = urlToParams(resolved.url).map((p) => p.key)
+  const overridden =
+    (target.header !== undefined &&
+      isOverriddenByUserHeaders(target.header.toLowerCase(), enabledUserHeaderNames)) ||
+    (target.query !== undefined && isAuthQueryOverriddenByUser(target.query, userQueryKeys))
+
+  // P0 §5.5：不再无条件 append——与 buildRequestPlan 走同一 mergeContributions；
+  // overridden=true 时按遮罩形态 materialize（零解析、零 trace，R-03）。
+  const materialized = await materializeAuthContribution(auth, 'resolved', deps?.resolveSecret, overridden)
   const merged = mergeContributions({
     userHeaders: resolved.headers,
     contributions:
@@ -56,9 +80,7 @@ export async function applyAuth(
         : [],
     suppression: [],
     ...(materialized.query !== undefined ? { authQuery: materialized.query } : {}),
-    // §5.6：URL 文本中已有的 query 参数即「用户参数」（恒视为 enabled）；
-    // query 名按大小写敏感精确比较（RFC 3986 无大小写折叠）。
-    userQueryKeys: urlToParams(resolved.url).map((p) => p.key),
+    userQueryKeys,
   })
 
   let url = resolved.url

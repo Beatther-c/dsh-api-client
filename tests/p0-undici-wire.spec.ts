@@ -331,6 +331,43 @@ describe('§8.1.2：runtime Header capability 探测（catalog 收录依据，un
   })
 })
 
+describe('R-03 回归（wire 面，GPT review P0-blocker）：被覆盖 Auth 的失效 SecretRef 不反向阻断真实 Send', () => {
+  it('resolveSecret 必抛 + enabled 用户 Authorization → 200 成功、零调用、wire 只有用户值', async () => {
+    const resolveSecret = vi.fn((): string => {
+      throw new Error('dangling secret ref (must never be resolved)')
+    })
+    const { result } = await executeRequest(
+      req({
+        url: `${baseUrl}/echo`,
+        headers: [{ key: 'Authorization', value: 'Bearer user-wins', enabled: true }],
+        auth: { type: 'bearer', token: createSecretRef('wire-r03-dead-ref') },
+      }),
+      { policy: LOCAL_POLICY, resolveSecret },
+    )
+    expect(result.status).toBe(200)
+    expect(resolveSecret).not.toHaveBeenCalled()
+    expect(rawCount('authorization')).toBe(1)
+    expect(lastRequest.headers['authorization']).toBe('Bearer user-wins')
+  })
+
+  it('Query API Key 同路径：enabled 同名用户参数 + 失效 SecretRef → 200 成功、wire query 只有用户值', async () => {
+    const resolveSecret = vi.fn((): string => {
+      throw new Error('dangling secret ref (must never be resolved)')
+    })
+    const { result } = await executeRequest(
+      req({
+        url: `${baseUrl}/echo`,
+        params: [{ key: 'api_key', value: 'user-val', enabled: true }],
+        auth: { type: 'apikey', key: 'api_key', value: createSecretRef('wire-r03-q-dead'), in: 'query' },
+      }),
+      { policy: LOCAL_POLICY, resolveSecret },
+    )
+    expect(result.status).toBe(200)
+    expect(resolveSecret).not.toHaveBeenCalled()
+    expect(lastRequest.url).toBe('/echo?api_key=user-val')
+  })
+})
+
 describe('§8.1.1：preview 与 resolved/wire 三方对比（普通值逐项一致；secret 先 redaction 归一化再比较）', () => {
   it('同一请求：preview 安全投影 ↔ resolved plan ↔ echo server 实收', async () => {
     const request = req({

@@ -2,7 +2,7 @@
  * TC-C-06…09：Auth 应用（§7.5，AC-15）。
  * bearer/basic/apikey 材料可为 SecretRef——执行期注入 resolveSecret 解析，core 不碰存储。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ApiRequest, Collection, ResolvedRequest } from '@dsh-api-client/shared'
 import { createSecretRef } from '@dsh-api-client/shared'
 import { applyAuth, resolveInheritedAuth } from '@dsh-api-client/core'
@@ -135,5 +135,61 @@ describe('TC-C-09: Inherit Auth From Parent', () => {
       type: 'bearer',
       token: 't',
     })
+  })
+})
+
+describe('R-03 追加（orchestrator 授权）：applyAuth 惰性 materialize——被覆盖路径零解析、零 trace', () => {
+  it('enabled 用户同名 Header/Query → resolveSecret 零调用；失效 SecretRef 不再反向阻断', async () => {
+    const failing = vi.fn((): string => {
+      throw new Error('dangling secret ref (must never be resolved)')
+    })
+    // Header 位：用户 enabled authorization（大小写不同拼写）覆盖 Bearer 贡献
+    const headerOut = await applyAuth(
+      { type: 'bearer', token: createSecretRef('apply-r03-dead') },
+      {
+        method: 'GET',
+        url: 'https://api.example.com/users',
+        headers: [{ key: 'authorization', value: 'Bearer user-wins', enabled: true }],
+        secretValueTraces: [],
+      },
+      { resolveSecret: failing },
+    )
+    expect(failing).not.toHaveBeenCalled()
+    expect(headerOut.headers.filter((h) => h.key.toLowerCase() === 'authorization')).toEqual([
+      { key: 'authorization', value: 'Bearer user-wins', enabled: true },
+    ])
+    expect(headerOut.secretValueTraces).toEqual([])
+
+    // Query 位：URL 已有 enabled 同名 api_key 参数覆盖 apikey-in-query 贡献
+    const queryOut = await applyAuth(
+      { type: 'apikey', key: 'api_key', value: createSecretRef('apply-r03-q-dead'), in: 'query' },
+      {
+        method: 'GET',
+        url: 'https://api.example.com/users?api_key=inline',
+        headers: [],
+        secretValueTraces: [],
+      },
+      { resolveSecret: failing },
+    )
+    expect(failing).not.toHaveBeenCalled()
+    expect(queryOut.url).toBe('https://api.example.com/users?api_key=inline')
+    expect(queryOut.secretValueTraces).toEqual([])
+  })
+
+  it('disabled 用户行 → 不构成覆盖，SecretRef 正常解析并记 trace', async () => {
+    const resolveSecret = vi.fn(() => 'lazy-bearer-token')
+    const out = await applyAuth(
+      { type: 'bearer', token: createSecretRef('apply-r03-live') },
+      {
+        method: 'GET',
+        url: 'https://api.example.com/users',
+        headers: [{ key: 'Authorization', value: 'Bearer off', enabled: false }],
+        secretValueTraces: [],
+      },
+      { resolveSecret },
+    )
+    expect(resolveSecret).toHaveBeenCalledTimes(1)
+    expect(out.headers).toContainEqual({ key: 'Authorization', value: 'Bearer lazy-bearer-token', enabled: true })
+    expect(out.secretValueTraces).toEqual([{ location: 'auth', key: 'token', secretRef: 'apply-r03-live' }])
   })
 })

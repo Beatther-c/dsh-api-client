@@ -86,15 +86,48 @@ export function useCollectionSidebarWidth(): CollectionSidebarWidthState {
     }
   }, [api])
 
-  const sendPatch = useCallback(
+  /** api 经 ref 读取：写队列函数身份恒稳（防 client 引用变化误触发 effect 重跑/假 flush）。 */
+  const apiRef = useRef(api)
+  apiRef.current = api
+
+  // ---- PATCH 单写队列（last-write-wins sequencer，review R-10/P1）----
+  // 根问题：persist（立即）与 persistDebounced（300ms 定时器）可能并发发出两个 PATCH，
+  // 响应乱序时磁盘落旧值（会话内显示新值，reload 才暴露）。
+  // 合同：空闲时同步直发（保持「双击/pointerup 立即持久化」语义）；in-flight 期间的新值
+  // 只覆盖待发值（仅保留最新一个）；前一 PATCH settle（成败均算）后再发待发值；
+  // 失败仍走中文非阻断 toast + 内存不回滚（AC-33）。不改 Host 合同。
+  const writingRef = useRef(false)
+  const queuedWriteRef = useRef<number | null>(null)
+
+  const dispatchPatch = useCallback((value: number): void => {
+    writingRef.current = true
+    // settle（成败均算）后泵队列：单跳 then(onOk, onErr)——避免 catch+finally 双跳
+    // 拉长乱序窗口，也便于测试确定性排空。
+    const pump = (): void => {
+      const next = queuedWriteRef.current
+      if (next !== null) {
+        queuedWriteRef.current = null
+        dispatchPatch(next) // 串行续发最新待发值
+      } else {
+        writingRef.current = false
+      }
+    }
+    void apiRef.current.patch<PluginSettings>('/settings', { collectionSidebarWidth: value }).then(pump, () => {
+      // 非阻断：内存宽度不回滚，仅中文 toast（AC-33）；失败后续发队列不受影响。
+      toast.error(SIDEBAR_SAVE_FAILED_MESSAGE)
+      pump()
+    })
+  }, [])
+
+  const enqueuePatch = useCallback(
     (value: number): void => {
-      pendingRef.current = null
-      void api.patch<PluginSettings>('/settings', { collectionSidebarWidth: value }).catch(() => {
-        // 非阻断：内存宽度不回滚，仅中文 toast（AC-33）。
-        toast.error(SIDEBAR_SAVE_FAILED_MESSAGE)
-      })
+      if (writingRef.current) {
+        queuedWriteRef.current = value // last-write-wins：待发值被最新覆盖
+        return
+      }
+      dispatchPatch(value)
     },
-    [api],
+    [dispatchPatch],
   )
 
   const cancelTimer = useCallback((): void => {
@@ -109,10 +142,11 @@ export function useCollectionSidebarWidth(): CollectionSidebarWidthState {
       const next = clampSidebarPreference(width)
       touchedRef.current = true
       cancelTimer()
+      pendingRef.current = null // 取消的 debounce 值不再参与 unmount flush
       setPreferredWidth(next)
-      sendPatch(next)
+      enqueuePatch(next)
     },
-    [cancelTimer, sendPatch],
+    [cancelTimer, enqueuePatch],
   )
 
   const persistDebounced = useCallback(
@@ -125,29 +159,23 @@ export function useCollectionSidebarWidth(): CollectionSidebarWidthState {
       timerRef.current = setTimeout(() => {
         timerRef.current = undefined
         const value = pendingRef.current
-        if (value !== null) sendPatch(value)
+        pendingRef.current = null
+        if (value !== null) enqueuePatch(value)
       }, SIDEBAR_PERSIST_DEBOUNCE_MS)
     },
-    [cancelTimer, sendPatch],
+    [cancelTimer, enqueuePatch],
   )
 
-  // unmount：清定时器并 flush 未落盘的 debounce 值（fire-and-forget，不 setState）。
-  // deps 恒 []：flush 只允许发生在真正卸载时；api 经 ref 读取（真实 useHostApi 引用稳定，
-  // 此处再防御一层，避免任何 api 标识变化误触发「假 unmount flush」重复写盘）。
-  const apiRef = useRef(api)
-  apiRef.current = api
+  // unmount：清定时器并把未落盘的 debounce 值送入写队列（in-flight 时排队续发，
+  // 不丢最后一次键盘调整；fire-and-forget，不 setState）。deps 经 enqueuePatch 恒稳。
   useEffect(() => {
     return () => {
       if (timerRef.current !== undefined) clearTimeout(timerRef.current)
       const pending = pendingRef.current
       pendingRef.current = null
-      if (pending !== null) {
-        void apiRef.current.patch<PluginSettings>('/settings', { collectionSidebarWidth: pending }).catch(() => {
-          toast.error(SIDEBAR_SAVE_FAILED_MESSAGE)
-        })
-      }
+      if (pending !== null) enqueuePatch(pending)
     }
-  }, [])
+  }, [enqueuePatch])
 
   return { preferredWidth, loaded, persist, persistDebounced }
 }

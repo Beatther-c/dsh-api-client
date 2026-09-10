@@ -119,8 +119,8 @@ export interface ResizableCollectionPaneHandle {
 
 interface DragHandlers {
   move: (event: PointerEvent) => void
-  up: () => void
-  cancel: () => void
+  up: (event: PointerEvent) => void
+  cancel: (event: PointerEvent) => void
 }
 
 interface DragState {
@@ -251,6 +251,7 @@ export const ResizableCollectionPane = forwardRef<ResizableCollectionPaneHandle,
         move: (moveEvent: PointerEvent) => {
           const drag = dragRef.current
           if (drag === null) return
+          if (moveEvent.pointerId !== drag.pointerId) return // R-11：忽略其他指针（多指）的 move
           const { mode: currentMode, viewportWidth: currentViewport } = envRef.current
           const currentRange = getRenderedRange(currentMode, currentViewport)
           if (currentRange === null) return
@@ -258,8 +259,16 @@ export const ResizableCollectionPane = forwardRef<ResizableCollectionPaneHandle,
           drag.latest = next
           setWidthOverride(Math.round(next)) // pointermove 只更新 rendered，不持久化
         },
-        up: () => finalizeDrag(),
-        cancel: () => cancelDrag(),
+        up: (upEvent: PointerEvent) => {
+          const drag = dragRef.current
+          if (drag !== null && upEvent.pointerId !== drag.pointerId) return // R-11：其他指针的 up 不收敛当前拖动
+          finalizeDrag()
+        },
+        cancel: (cancelEvent: PointerEvent) => {
+          const drag = dragRef.current
+          if (drag !== null && cancelEvent.pointerId !== drag.pointerId) return // R-11
+          cancelDrag()
+        },
       }
       dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startRendered, latest: startRendered, handlers }
       setDragging(true)
@@ -283,6 +292,13 @@ export const ResizableCollectionPane = forwardRef<ResizableCollectionPaneHandle,
       },
       [],
     )
+
+    /** lostpointercapture 与 pointerup 等价收敛（R-11：过滤 pointerId，防无关指针丢失误收敛）。 */
+    const onSeparatorLostPointerCapture = (event: ReactPointerEvent<HTMLDivElement>): void => {
+      const drag = dragRef.current
+      if (drag !== null && event.pointerId !== drag.pointerId) return
+      finalizeDrag()
+    }
 
     // ---- 双击分隔条：恢复 260，立即更新内存并立即持久化 ----
     const onSeparatorDoubleClick = (): void => {
@@ -509,7 +525,7 @@ export const ResizableCollectionPane = forwardRef<ResizableCollectionPaneHandle,
           onPointerDown={onSeparatorPointerDown}
           onDoubleClick={onSeparatorDoubleClick}
           onKeyDown={onSeparatorKeyDown}
-          onLostPointerCapture={finalizeDrag}
+          onLostPointerCapture={onSeparatorLostPointerCapture}
           onMouseEnter={() => setSeparatorHovered(true)}
           onMouseLeave={() => setSeparatorHovered(false)}
         />

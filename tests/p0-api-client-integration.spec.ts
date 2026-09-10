@@ -39,7 +39,14 @@
  * 10. R3 回归（浏览器验收缺陷，AC-23/24 语义泄漏）：草稿 tab 保存成功后 key 仍为
  *    draft-N（仅 requestId 指向 Host 记录）——Request/Folder 删除按 key∨requestId
  *    双匹配映射回 tab.key 后关闭（active 左邻规则）、dirty 统计计入确认框；
- *    树重命名成功后的草稿名同步同类双匹配。
+ *    树重命名成功后的草稿名同步同类双匹配；
+ * 11. R-05 回归（GPT review P0-blocker）：SaveRequestModal 不再自建第二个
+ *    useCollections——「POST 成功 + 刷新 GET 失败」→ 父级 stale 横幅、Save 禁用、
+ *    Send 保留、重新刷新恢复；fetch 序列佐证单一状态机（无 modal 挂载期额外 GET、
+ *    POST 后恰好一次刷新 GET）；
+ * 12. R-07 回归（GPT 裁决 h 最小修复）：草稿保存成功后从树再打开同一请求 →
+ *    openRequest key∨requestId 双匹配激活原 draft-key tab——tab 总数不变、
+ *    无重复名、编辑器显示原草稿、树选择随 activeTab.requestId 同步。
  */
 import { act, createElement } from 'react'
 import type { ReactElement } from 'react'
@@ -796,6 +803,36 @@ describe('ApiClientView R3 回归：保存成功的 draft-key tab 在节点删�
   })
 })
 
+// ---- 3c. R-07 回归：draft-key tab 不被树重复打开（GPT 裁决 h 最小修复） ----
+
+describe('ApiClientView R-07 回归：保存后的 Request 再从树打开不产生双 tab', () => {
+  it('草稿保存成功后树 openRequest 同一请求 → 激活原 draft-key tab：总数不变、无重复名、树选择同步', async () => {
+    await renderView([savedRequestRoute()])
+    await clickRow('示例集合')
+    await clickRow('用户模块')
+    await clickRow('r1 用户列表')
+    await saveDraftViaModal({ url: 'https://api.example.com/echo' })
+    expect(tabNames()).toEqual(['r1 用户列表', '未命名请求'])
+
+    // 先把 active 切到 r1（令「激活原 tab」的断言非平凡）
+    await clickRow('r1 用户列表')
+    expect(urlInputValue()).toBe('https://api.example.com/r1')
+
+    // 树再打开 r-new：修复前会新建第二个『未命名请求』tab（key=r-new）并激活它
+    await clickRow('未命名请求')
+    expect(tabNames()).toEqual(['r1 用户列表', '未命名请求'])
+    // activeKey = 原 draft tab 的真实 key（draft-N）：编辑器显示其草稿 URL
+    expect(urlInputValue()).toBe('https://api.example.com/echo')
+    // 树选择同步：selectedRequestId = activeTab.requestId = r-new
+    expect(treeRow('未命名请求').getAttribute('aria-selected')).toBe('true')
+    // 反复打开仍恒定两个 tab
+    await clickRow('r1 用户列表')
+    await clickRow('未命名请求')
+    expect(tabNames()).toEqual(['r1 用户列表', '未命名请求'])
+    expect(urlInputValue()).toBe('https://api.example.com/echo')
+  })
+})
+
 // ---- 4. dirty tab 单独关闭（§7.5，AC-27） ----
 
 describe('ApiClientView dirty tab 关闭（AC-27）', () => {
@@ -941,6 +978,54 @@ describe('ApiClientView stale 一致性（§4.9）', () => {
     await clickEl(q('tree-stale-refresh'))
     expect(q('tree-stale-banner')).toBeNull()
     expect(buttonByText('Save')!.disabled).toBe(false)
+  })
+})
+
+// ---- 6b. R-05 回归：SaveRequestModal 单一 useCollections 状态机（GPT review P0-blocker） ----
+
+describe('ApiClientView R-05 回归：SaveRequestModal 走父级唯一状态机（§4.9）', () => {
+  it('POST 成功 + 刷新 GET 失败 → 父级 stale 横幅、Save 禁用、Send 保留；fetch 序列佐证单一状态机；刷新成功后恢复', async () => {
+    let getCount = 0
+    await renderView([
+      savedRequestRoute(),
+      [
+        /^GET \/api-client\/collections$/,
+        () => {
+          getCount += 1
+          if (getCount === 2) throw new Error('network down')
+          return mockResponse(200, server)
+        },
+      ],
+    ])
+    await clickRow('示例集合')
+    await clickRow('用户模块')
+    await clickRow('r1 用户列表')
+
+    // 草稿 → modal 保存：POST 200 → 父级 runMutation 的唯一刷新 GET 失败 → 父级 stale。
+    // 修复前：stale 落在 modal 自建临时 hook 上，Modal 卸载即丢 → 父级无横幅、mutation 照常放行。
+    await saveDraftViaModal({ url: 'https://api.example.com/echo' })
+    expect(mocks.toastError).toHaveBeenCalledWith('数据已保存，列表刷新失败')
+    expect(mocks.toastInfo).toHaveBeenCalledWith('请求已保存')
+    expect(q('tree-stale-banner')).not.toBeNull()
+    // onSaved 语义保持：tab 转 clean + requestId 落位
+    expect(tabNames()).toEqual(['r1 用户列表', '未命名请求'])
+    // 单一状态机佐证（fetch 调用序列）：GET /collections 恰 2 次 = 初始加载 + mutation 后一次刷新。
+    // 修复前为 4 次 = 初始 + modal 自建 hook 挂载期额外 GET + modal hook 刷新 + onSaved 重复 refresh。
+    expect(collectionGets().length).toBe(2)
+    expect(calls.filter((call) => call.method === 'POST').length).toBe(1)
+
+    // stale 期间：重新 dirty 后 Save 仍禁用（stale 门禁而非 clean 基线）、Send 保留（§4.9）
+    setUrlInput('https://api.example.com/echo2')
+    expect(buttonByText('Save')!.disabled).toBe(true)
+    expect(buttonByText('Send')!.disabled).toBe(false)
+
+    // 「重新刷新」成功 → stale 解除 → Save 恢复；GET 共 3 次（仍是单一序列）
+    await clickEl(q('tree-stale-refresh'))
+    expect(q('tree-stale-banner')).toBeNull()
+    expect(buttonByText('Save')!.disabled).toBe(false)
+    expect(collectionGets().length).toBe(3)
+    // 刷新成功后新请求在树可见（POST 时已写入 server 权威投影）
+    expect(treeRowOrNull('未命名请求')).not.toBeNull()
   })
 })
 

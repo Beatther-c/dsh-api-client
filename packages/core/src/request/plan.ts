@@ -261,10 +261,39 @@ async function resolveMaterial(
   return { value, trace: { ...trace, secretRef: material.$ref } }
 }
 
+/**
+ * R-03（GPT review）：Auth 贡献的目标名称与位置——只读 AuthConfig 判别信息，
+ * 零材料解析（bearer/basic → Header 'Authorization'；apikey → Header/Query auth.key）。
+ * 供「先判覆盖、后 materialize」的预检与 buildCurlCommand 的 <redacted> 结构投影使用。
+ */
+export function authContributionTarget(auth: AuthConfig): { header?: string; query?: string } {
+  switch (auth.type) {
+    case 'none':
+      return {}
+    case 'inherit':
+      throw new Error('resolve the inherit chain (resolveInheritedAuth) before applyAuth')
+    case 'bearer':
+    case 'basic':
+      return { header: 'Authorization' }
+    case 'apikey':
+      return auth.in === 'header' ? { header: auth.key } : { query: auth.key }
+  }
+}
+
+/** §5.3 步骤 7 判定的单点实现——mergeContributions、R-03 Auth 惰性 materialize 预检（buildRequestPlan 与 auth/apply 兼容 wrapper）共用，杜绝第二套覆盖判定。 */
+export function isOverriddenByUserHeaders(lowerName: string, userHeaderNames: ReadonlySet<string>): boolean {
+  return userHeaderNames.has(lowerName)
+}
+
+/** §5.6 Query API Key 冲突判定的单点实现（mergeContributions 与 R-03 预检共用）。 */
+export function isAuthQueryOverriddenByUser(name: string, userQueryKeys: readonly string[]): boolean {
+  return userQueryKeys.includes(name)
+}
+
 export interface MaterializedAuthTarget {
   /** Header 名或 Query 参数名（保留用户在 Auth 配置中的拼写）。 */
   name: string
-  /** resolved 模式 = 真实材料；preview 模式 = 恒 SECRET_VALUE_PREVIEW（绝不解析）。 */
+  /** resolved 模式 = 真实材料；preview 模式与 overridden 惰性形态 = 恒 SECRET_VALUE_PREVIEW（绝不解析）。 */
   value: string
 }
 
@@ -273,7 +302,7 @@ export interface MaterializedAuthContribution {
   header?: MaterializedAuthTarget
   /** Query 贡献：apikey in query（§5.6，只进 RequestPlanPreview.query，不计入 header 数）。 */
   query?: MaterializedAuthTarget
-  /** SecretRef 解析 trace（location 'auth'）；preview 模式恒空——从不解析。 */
+  /** SecretRef 解析 trace（location 'auth'）；preview 模式与 overridden 惰性形态恒空——从不解析。 */
   traces: SecretTrace[]
 }
 
@@ -281,6 +310,12 @@ export interface MaterializedAuthContribution {
  * Auth 贡献 materialize（两模式唯一差异点之二，§5.1）：
  * preview 模式绝不触碰 resolveSecret（红线 3：preview 输出不含可恢复 secret 材料），
  * 敏感值一律 SECRET_VALUE_PREVIEW；resolved 模式解析 SecretRef 并收集 trace。
+ *
+ * R-03（GPT review）：`overridden=true`（调用方已按冻结优先级用 enabled 用户
+ * Header/Query 判定该贡献被覆盖）时，resolved 模式同样按遮罩形态 materialize——
+ * 零 SecretRef 解析、零 trace。低优先级 Auth 的失效 SecretRef 不得反向阻断已被
+ * 高优先级用户配置覆盖的 Send（其材料本就不会进 wire，preview 恒遮罩）。
+ *
  * 注意：Auth 材料中的 {{var}} 模板不做变量解析（与既有 applyAuth 语义一致，
  * 变量解析只覆盖 URL/params/headers/body——TC-C-06…08 冻结）。
  */
@@ -288,14 +323,17 @@ export async function materializeAuthContribution(
   auth: AuthConfig,
   mode: 'preview' | 'resolved',
   resolveSecret?: SecretResolver,
+  overridden?: boolean,
 ): Promise<MaterializedAuthContribution> {
+  // preview 展示 materialize 与 overridden 惰性 materialize 共用遮罩形态（绝不触碰 resolveSecret）。
+  const masked = mode === 'preview' || overridden === true
   switch (auth.type) {
     case 'none':
       return { traces: [] }
     case 'inherit':
       throw new Error('resolve the inherit chain (resolveInheritedAuth) before applyAuth')
     case 'bearer': {
-      if (mode === 'preview') {
+      if (masked) {
         return { header: { name: 'Authorization', value: SECRET_VALUE_PREVIEW }, traces: [] }
       }
       const { value, trace } = await resolveMaterial(auth.token, resolveSecret, { location: 'auth', key: 'token' })
@@ -305,7 +343,7 @@ export async function materializeAuthContribution(
       }
     }
     case 'basic': {
-      if (mode === 'preview') {
+      if (masked) {
         return { header: { name: 'Authorization', value: SECRET_VALUE_PREVIEW }, traces: [] }
       }
       const { value: password, trace } = await resolveMaterial(auth.password, resolveSecret, {
@@ -318,9 +356,9 @@ export async function materializeAuthContribution(
       }
     }
     case 'apikey': {
-      if (mode === 'preview') {
-        const masked = { name: auth.key, value: SECRET_VALUE_PREVIEW }
-        return auth.in === 'header' ? { header: masked, traces: [] } : { query: masked, traces: [] }
+      if (masked) {
+        const maskedTarget = { name: auth.key, value: SECRET_VALUE_PREVIEW }
+        return auth.in === 'header' ? { header: maskedTarget, traces: [] } : { query: maskedTarget, traces: [] }
       }
       const { value, trace } = await resolveMaterial(auth.value, resolveSecret, { location: 'auth', key: auth.key })
       const target = { name: auth.key, value }
@@ -430,7 +468,7 @@ export interface MergeContributionsInput {
   suppression: readonly SuppressedGeneratedHeader[]
   /** Auth Query 贡献（apikey in query；值已按模式 materialize）。 */
   authQuery?: MaterializedAuthTarget
-  /** 用户 URL/Params enabled 参数 key（§5.6 冲突判定；query 名按大小写敏感精确比较——RFC 3986 无大小写折叠）。 */
+  /** 用户 URL/Params enabled 参数 key（§5.6 冲突判定；URI 标准未赋予 query 参数名类似 Header 的 case-insensitive 语义，本客户端不主动 case-fold）。 */
   userQueryKeys?: readonly string[]
   /** 已按适用性过滤的 runtime 条目（§0.6：只形成 projection，绝不进 wire、绝不预造最终 value）。 */
   runtime?: readonly RuntimeHeaderSpec[]
@@ -479,7 +517,7 @@ export function mergeContributions(input: MergeContributionsInput): MergeContrib
       input.suppression.some((s) => s.name === lower && s.source === contribution.source)
     ) {
       status = 'suppressed'
-    } else if (userHeaderNames.has(lower)) {
+    } else if (isOverriddenByUserHeaders(lower, userHeaderNames)) {
       status = 'overridden'
     } else {
       status = 'active'
@@ -501,7 +539,7 @@ export function mergeContributions(input: MergeContributionsInput): MergeContrib
   let runtimeHeaderCount = 0
   for (const spec of input.runtime ?? []) {
     runtimeHeaderCount += 1
-    const status: GeneratedItemStatus = userHeaderNames.has(spec.name.toLowerCase())
+    const status: GeneratedItemStatus = isOverriddenByUserHeaders(spec.name.toLowerCase(), userHeaderNames)
       ? spec.userOverridable
         ? 'overridden'
         : 'invalid-user-override'
@@ -521,7 +559,7 @@ export function mergeContributions(input: MergeContributionsInput): MergeContrib
   const queryItems: GeneratedQueryPreview[] = []
   let activeAuthQuery: { key: string; value: string } | undefined
   if (input.authQuery !== undefined) {
-    const overridden = (input.userQueryKeys ?? []).includes(input.authQuery.name)
+    const overridden = isAuthQueryOverriddenByUser(input.authQuery.name, input.userQueryKeys ?? [])
     queryItems.push({
       name: input.authQuery.name,
       valuePreview: SECRET_VALUE_PREVIEW,
@@ -651,7 +689,20 @@ export async function buildRequestPlan(
   }
 
   // ---- 两模式差异点之二：Auth materialize（preview 绝不触碰 resolveSecret）----
-  const auth = await materializeAuthContribution(effectiveAuth, options.mode, options.resolveSecret)
+  // R-03（GPT review）：materialize 不得先于覆盖判定——先由 Auth 类型得出目标名称/
+  // 位置（authContributionTarget，零解析），再用与 mergeContributions 步骤 7/§5.6
+  // 同源的判定（isOverriddenByUserHeaders / isAuthQueryOverriddenByUser）确定贡献
+  // 是否被 enabled 用户项覆盖；仅 active 时才解析 SecretRef。被覆盖路径零解析、
+  // 零 trace——低优先级 Auth 的失效 SecretRef 不得反向阻断高优先级用户配置的 Send。
+  const authTarget = authContributionTarget(effectiveAuth)
+  const enabledUserHeaderNames = new Set(
+    userHeaders.filter((h) => h.enabled && h.key !== '').map((h) => h.key.toLowerCase()),
+  )
+  const authOverridden =
+    (authTarget.header !== undefined &&
+      isOverriddenByUserHeaders(authTarget.header.toLowerCase(), enabledUserHeaderNames)) ||
+    (authTarget.query !== undefined && isAuthQueryOverriddenByUser(authTarget.query, userQueryKeys))
+  const auth = await materializeAuthContribution(effectiveAuth, options.mode, options.resolveSecret, authOverridden)
 
   // ---- 贡献组装（顺序 = §5.3 冻结优先级：Body → Auth → client-default）----
   const contributions: GeneratedContribution[] = []
@@ -780,8 +831,11 @@ export function posixShellQuote(text: string): string {
  * redaction 规则：
  * - 敏感 Header 名（Authorization/Cookie/X-API-Key…）下的用户字面量 → <redacted>；
  * - secret 环境变量引用（URL/Header/Body 内）→ <redacted>；普通变量保留 {{name}}；
- * - Auth 派生项不进 cURL（§5.10「active、安全可复制的自动项」；P0 不提供复制已解析
- *   secret 的 cURL）——Auth Query 已在 URL 中以 <redacted> 形态出现；
+ * - Auth 派生 Header 项以 <redacted> 结构输出（R-06，GPT review 裁决 c：§5.10
+ *   「必须 redacted」= 值替换为 <redacted>，而非删除整条结构——与 Query API Key
+ *   的 api_key=<redacted> 形态对称，复制出的 cURL 与原请求结构一致）；全程零
+ *   SecretRef 解析（只需 authContributionTarget 的目标名，红线 3）；被用户
+ *   Header 覆盖时只输出用户行的安全版本（敏感名下字面量按既有规则 <redacted>）；
  * - runtime 项不进 cURL（发送前无可复制值，§0.6 不伪造）；
  * - form-data 不复制 Content-Type 占位 boundary（§5.7）——改用 --form-string 行，
  *   由 curl 发送时自己生成真实 boundary；--form-string 同时避免 -F 对 @/< 前缀的
@@ -801,23 +855,31 @@ export function buildCurlCommand(request: ApiRequest, options?: SafeCopyOptions)
     parts.push('-H', posixShellQuote(`${h.key}: ${value}`))
   }
 
-  // 安全自动项：状态判定与 §5.3 同源（复用 mergeContributions，不另设算法）——
-  // 仅 active 且非敏感（Body Content-Type / default Accept）进入。
+  // 安全自动项：状态判定与 §5.3 同源（复用 mergeContributions，不另设算法）。
+  // R-06：Auth 派生项以 <redacted> 值参与结构投影（contribution.value 即占位符，
+  // 全程不 materialize 任何 Auth 材料）；覆盖判定走同一 merge——被用户同名
+  // enabled Header 覆盖时 Auth 项不输出，只保留用户行的安全版本。
   const isFormData = request.body.type === 'form-data'
   const contentType = bodyContentType(request.body)
+  const authTarget = authContributionTarget(resolveInheritedAuth(request, options?.collection))
   const merged = mergeContributions({
     userHeaders: request.headers,
     contributions: [
       ...(contentType !== undefined && !isFormData
         ? [{ name: 'Content-Type', value: contentType, source: 'body' as const, sensitive: false, suppressible: true }]
         : []),
+      ...(authTarget.header !== undefined
+        ? [{ name: authTarget.header, value: REDACTED, source: 'auth' as const, sensitive: true, suppressible: false }]
+        : []),
       { name: 'Accept', value: DEFAULT_ACCEPT, source: 'client-default' as const, sensitive: false, suppressible: true },
     ],
     suppression: sanitizeSuppressedGeneratedHeaders(request.suppressedGeneratedHeaders ?? []),
   })
   for (const item of merged.headerItems) {
-    if (item.status !== 'active' || item.sensitive) continue
-    parts.push('-H', posixShellQuote(`${item.name}: ${item.valuePreview}`))
+    if (item.status !== 'active') continue
+    // 敏感项（Auth 派生）恒以 <redacted> 输出（R-06）；非敏感项（Body CT / default Accept）按真实生成值。
+    const value = item.sensitive ? REDACTED : item.valuePreview
+    parts.push('-H', posixShellQuote(`${item.name}: ${value}`))
   }
 
   // Body（编辑器字面量；secret 环境变量引用 → <redacted>）。

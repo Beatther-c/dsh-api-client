@@ -10,9 +10,12 @@
  * - Folder CRUD 服务方法（createFolder/renameFolder/deleteFolder，含乐观锁版本校验）；
  * - nextTimestamp 单调时间（§4.3）：本服务全部写路径统一使用，保证同一实体
  *   连续 mutation 的 updatedAt 严格递增（Cut token 依赖该语义检测版本变化）；
- * - commitCollections：接收完整 nextCollections[] 的**单次**原子落盘
- *   （跨 Collection move / clipboard paste 专用，§4.4 步骤 5/6：写盘成功后
- *   才替换内存权威态，失败则内存保持原状）。
+ * - **write-first 统一提交（§4.4 普遍化，R-04）**：全部列表级 mutation 一律
+ *   先组装完整 nextCollections[]、经唯一私有 commit() 一次原子落盘，写成功后
+ *   才替换 this.collections——写盘失败时内存权威态保持原状，绝不出现
+ *   「内存已成功、磁盘还是旧数据」的假权威状态；
+ * - commitCollections：对外暴露的同语义提交口（跨 Collection move /
+ *   clipboard paste 专用，§4.4 步骤 5/6，绝不逐 Collection 分次写）。
  */
 import type { ApiRequest, AuthConfig, Collection, CollectionVariable, Folder, HttpMethod, SuppressedGeneratedHeader } from '@dsh-api-client/shared'
 import {
@@ -107,13 +110,21 @@ export class CollectionService {
     this.collections = this.store.readJson<Collection[]>(this.store.layout.collectionsFile) ?? []
   }
 
-  private persist(): void {
-    this.store.writeJson(this.store.layout.collectionsFile, this.collections)
+  /**
+   * 统一 write-first 提交（实施设计 §4.4「写盘失败 this.collections 不替换」的
+   * 普遍化；R-04）：完整列表一次原子落盘，写成功后才替换内存权威态——
+   * writeJson 抛错时 this.collections 保持原状，后续 GET 绝不会返回与磁盘
+   * 不一致的「假权威数据」（PROJECT.md 红线 2：Host 权威）。
+   * 本服务全部列表级 mutation（create/delete/duplicate/import/replace）与
+   * clipboard 事务（commitCollections）唯一走此路径。
+   */
+  private commit(nextCollections: Collection[]): void {
+    this.store.writeJson(this.store.layout.collectionsFile, nextCollections)
+    this.collections = nextCollections
   }
 
   private replace(updated: Collection): Collection {
-    this.collections = this.collections.map((c) => (c.id === updated.id ? updated : c))
-    this.persist()
+    this.commit(this.collections.map((c) => (c.id === updated.id ? updated : c)))
     return updated
   }
 
@@ -138,8 +149,7 @@ export class CollectionService {
    * （clipboard cut/copy paste 的跨 Collection 事务出口，绝不逐 Collection 分次写）。
    */
   commitCollections(nextCollections: Collection[]): void {
-    this.store.writeJson(this.store.layout.collectionsFile, nextCollections)
-    this.collections = nextCollections
+    this.commit(nextCollections)
   }
 
   list(): Collection[] {
@@ -158,8 +168,7 @@ export class CollectionService {
 
   create(name: string): Collection {
     const collection = createCollection({ name, now: this.nextTimestamp() })
-    this.collections = [...this.collections, collection]
-    this.persist()
+    this.commit([...this.collections, collection])
     return collection
   }
 
@@ -174,22 +183,19 @@ export class CollectionService {
 
   delete(id: string): void {
     this.require(id)
-    this.collections = this.collections.filter((c) => c.id !== id)
-    this.persist()
+    this.commit(this.collections.filter((c) => c.id !== id))
   }
 
   duplicate(id: string): Collection {
     const source = this.require(id)
     const copy = duplicateCollection(source, this.nextTimestamp(source))
-    this.collections = [...this.collections, copy]
-    this.persist()
+    this.commit([...this.collections, copy])
     return copy
   }
 
   /** 导入落库：adapter 已生成全新 id 的完整 Collection 直接追加（import-service 用；时间戳由 adapter 生成，不属既有实体的版本序列）。 */
   importCollection(collection: Collection): Collection {
-    this.collections = [...this.collections, collection]
-    this.persist()
+    this.commit([...this.collections, collection])
     return collection
   }
 

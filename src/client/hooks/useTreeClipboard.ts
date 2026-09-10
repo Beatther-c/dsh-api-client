@@ -9,10 +9,16 @@
  * - expiresAt 已过 → 本地禁用，原因「剪贴板已过期」；
  * - kind + operation + targetKind 静态矩阵（§6.5 表逐字）→ 本地禁用 + 中文具体原因；
  * - 本 Client 自己删除了 Cut 源 → 立即清空本地 token（notifyLocalRequestsDeleted）；
- * - 外部删除/版本变化**不做本地预判**——执行 paste 由 Host 404/409 裁决：
- *   404 clipboard-not-found / Cut 源 request-not-found / Cut 409 → token 永远无法
- *   再成功 → 清空本地 token + 中文提示引导重新剪切；Copy token 可重复粘贴
- *   （命名由 Host 按「副本/副本 2」自动生成），Cut 成功后 consumed → 清空。
+ * - 外部删除/版本变化**不做本地预判**——执行 paste 由 Host 404/409 裁决（R-01，
+ *   GPT review 裁决）：
+ *   - 409（源版本或目标版本冲突，客户端不可区分）→ **一律保留 token**——Host
+ *     §3.1.1 保证 409 不消费 token；目标冲突刷新后以同 token + 新 expected 重试
+ *     即可成功（Host 测试已证明），冲突文案与 stale 由 runMutation 统一给出；
+ *   - 404 clipboard-not-found（过期/Host 重启）→ 无条件清空本地 token；
+ *   - 404 request-not-found 且 operation=cut（Cut 源被外部删除）→ 按 §0.3 清空
+ *     + 中文提示；copy paste 的目标 404 → 保留 token（刷新后另选目标）；
+ *   - Copy 成功 consumed=false → token 可重复粘贴（命名「副本/副本 2」归 Host）；
+ *     Cut 成功 consumed=true → 清空。
  *
  * 关于 `cutSourceRef`（实现注记，见 WP5 报告）：§0.3 要求「本 Client 自己删除
  * Cut 来源时立即清空本地 token」，判定需要把删除的 Request id 与剪切源比对。
@@ -22,9 +28,14 @@
  * （§4.8 本来就持有节点 id）相同。这是不新增 clipboard status 端点（§0.3 冻结）
  * 前提下实现该条款的唯一途径。
  *
- * mutation 流程复用 useCollections.runMutation（bridge 注入）：paste 成功 →
- * await GET /collections 刷新投影；409 → stale=true + Host message toast；
- * 刷新失败 → stale +「数据已保存，列表刷新失败」（§4.9 全流程）。
+ * mutation 流程分工（R-08，GPT review 裁决）：
+ * - **paste**（唯一的树数据 mutation）走 useCollections.runMutation（bridge 注入）：
+ *   成功 → await GET /collections 刷新投影；409 → stale=true + Host message toast；
+ *   刷新失败 → stale +「数据已保存，列表刷新失败」（§4.9 全流程）；
+ * - **copy/cut** 只创建 Host 内存 clipboard entry、不改任何 Collection 数据——
+ *   直调 clipboard 端点（自管 pending 与错误 toast），成功后**不刷新投影**、
+ *   失败后**不置 stale**（假 stale 会错误阻断后续 paste）；Cut 的 source-version
+ *   409 单独给 Host 逐字冲突文案。
  *
  * 本文件不 import 任何 DSH 包（TC-A-03）。
  */
@@ -145,6 +156,15 @@ export interface TreeClipboardApi {
 
 const enc = encodeURIComponent
 
+/** 错误 → 用户可见 message（与 useCollections.report 同格式；Host message 已经 redaction）。 */
+function hostErrorMessage(error: unknown): string {
+  return error instanceof HostApiError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error)
+}
+
+function isConflict(error: unknown): boolean {
+  return error instanceof HostApiError && error.status === 409
+}
+
 export function useTreeClipboard(bridge: TreeClipboardBridge): TreeClipboardApi {
   const api = useHostApi()
   const [clipboard, setClipboard] = useState<TreeClipboardState | undefined>()
@@ -176,48 +196,53 @@ export function useTreeClipboard(bridge: TreeClipboardBridge): TreeClipboardApi 
     async (source: CopySource): Promise<boolean> => {
       if (!beginOperation()) return false
       try {
-        // copy 不改 collections 数据，但走 runMutation 复用统一错误 toast；成功后的
-        // refresh 顺带把投影版本刷到最新（降低后续 paste 409 概率）。
-        const run = await bridge.runMutation(() =>
-          api.post<TreeClipboardDescriptor>(
-            '/tree/clipboard/copy',
-            source.nodeId === undefined ? { kind: source.kind, collectionId: source.collectionId } : { kind: source.kind, collectionId: source.collectionId, nodeId: source.nodeId },
-          ),
+        // R-08：copy 只创建 Host 内存 clipboard entry、不改 Collection 数据——
+        // 不走 runMutation（成功后零 GET /collections，失败后不置 stale）。
+        const descriptor = await api.post<TreeClipboardDescriptor>(
+          '/tree/clipboard/copy',
+          source.nodeId === undefined
+            ? { kind: source.kind, collectionId: source.collectionId }
+            : { kind: source.kind, collectionId: source.collectionId, nodeId: source.nodeId },
         )
-        if (!run.committed || run.result === undefined) return false
         cutSourceRef.current = undefined
-        updateClipboard(run.result)
+        updateClipboard(descriptor)
         toast.info('已复制，可粘贴到目标位置')
         return true
+      } catch (err) {
+        toast.error(hostErrorMessage(err))
+        return false
       } finally {
         endOperation()
       }
     },
-    [api, beginOperation, bridge, endOperation, updateClipboard],
+    [api, beginOperation, endOperation, updateClipboard],
   )
 
   const cut = useCallback(
     async (source: CutSource): Promise<boolean> => {
       if (!beginOperation()) return false
       try {
-        // 409（源版本已变）→ runMutation 统一 stale=true + Host message toast。
-        const run = await bridge.runMutation(() =>
-          api.post<TreeClipboardDescriptor>('/tree/clipboard/cut', {
-            requestId: source.requestId,
-            requestUpdatedAt: source.requestUpdatedAt,
-            sourceCollectionUpdatedAt: source.sourceCollectionUpdatedAt,
-          }),
-        )
-        if (!run.committed || run.result === undefined) return false
+        // R-08：同 copy——clipboard 端点直调，不刷新投影、不置 stale。
+        const descriptor = await api.post<TreeClipboardDescriptor>('/tree/clipboard/cut', {
+          requestId: source.requestId,
+          requestUpdatedAt: source.requestUpdatedAt,
+          sourceCollectionUpdatedAt: source.sourceCollectionUpdatedAt,
+        })
         cutSourceRef.current = source.requestId
-        updateClipboard(run.result)
+        updateClipboard(descriptor)
         toast.info('已剪切，粘贴到目标位置完成移动')
         return true
+      } catch (err) {
+        // Cut 的 source-version 409：单独给 Host 逐字冲突文案（§3.1.1）——
+        // 不置 stale（clipboard 操作不改树数据），用户重新剪切或刷新后重试。
+        if (isConflict(err)) toast.error(err instanceof HostApiError ? err.message : hostErrorMessage(err))
+        else toast.error(hostErrorMessage(err))
+        return false
       } finally {
         endOperation()
       }
     },
-    [api, beginOperation, bridge, endOperation, updateClipboard],
+    [api, beginOperation, endOperation, updateClipboard],
   )
 
   /** 本地清空 + best-effort Host DELETE（幂等；失败静默）。 */
@@ -262,18 +287,24 @@ export function useTreeClipboard(bridge: TreeClipboardBridge): TreeClipboardApi 
           }
           return true
         }
-        // 失败分支（409/404 已由 runMutation 统一 toast + stale 处理；此处只做 token 生命周期）。
+        // 失败分支（R-01，GPT review 裁决）：
+        // - 409（源版本或目标版本冲突，客户端不可区分）→ **保留 token**——Host
+        //   §3.1.1 保证 409 不消费 token；目标冲突刷新后以同 token + 新 expected
+        //   重试即可成功。冲突文案（Host 逐字 message）与 stale 已由 runMutation
+        //   统一给出，此处不重复 toast、不清空。
+        // - 404 clipboard-not-found（过期/Host 重启）→ 无条件清空本地 token。
+        // - 404 request-not-found 且 cut（§0.3 Cut 源被外部删除）→ 清空 + 中文提示。
+        //   copy paste 的目标 404（collection/folder/request-not-found）→ 保留
+        //   token，刷新投影后另选目标。
         const cause = run.cause
         if (cause instanceof HostApiError) {
           if (cause.code === 'clipboard-not-found') {
-            // Host 已无此 token（过期/重启）→ 本地同步清空。
             updateClipboard(undefined)
             cutSourceRef.current = undefined
-          } else if (current.operation === 'cut' && (cause.status === 409 || cause.code === 'request-not-found')) {
-            // Cut 409 后 token 永不消费但永远无法再成功（WP3 对接确认）；源被外部删除同理。
+          } else if (current.operation === 'cut' && cause.code === 'request-not-found') {
             updateClipboard(undefined)
             cutSourceRef.current = undefined
-            toast.info('剪切内容已无法粘贴，请重新剪切')
+            toast.info('剪切来源已被删除，剪贴板已清空')
           }
         }
         return false

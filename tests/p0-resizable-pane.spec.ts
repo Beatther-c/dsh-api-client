@@ -12,7 +12,9 @@
  *   焦点归还按钮、≥526 无动画切回 docked 保留焦点、docked 缩窄默认关闭、overlay 不持久化；
  * - 保存失败 → 中文非阻断 toast，内存宽度不回滚；
  * - 不重挂载契约：树与主编辑器 DOM 节点恒等 + 搜索框草稿值全程保留；
- * - hook 细节：unmount flush 待持久化值、立即 persist 取消 pending debounce、迟到加载不覆盖用户值。
+ * - hook 细节：unmount flush 待持久化值、立即 persist 取消 pending debounce、迟到加载不覆盖用户值；
+ * - review 回修：R-10 PATCH 单写队列（last-write-wins，乱序响应不使磁盘落旧值）；
+ *   R-11 pointer 事件按 pointerId 过滤（多指第二指针不干扰当前拖动）。
  *
  * jsdom 补差：ResizeObserver / Pointer Events（setPointerCapture、PointerEvent）均为
  * 测试注入的 mock/polyfill——实现侧对缺失容错（见组件头注）。
@@ -207,17 +209,17 @@ function dispatch(element: Element | Window, event: Event): void {
 function pointerDown(element: Element, clientX: number, pointerId = 7): void {
   dispatch(element, new PointerEventMock('pointerdown', { clientX, pointerId, bubbles: true, cancelable: true }))
 }
-function pointerMove(clientX: number): void {
-  dispatch(window, new PointerEventMock('pointermove', { clientX, bubbles: true }))
+function pointerMove(clientX: number, pointerId = 7): void {
+  dispatch(window, new PointerEventMock('pointermove', { clientX, pointerId, bubbles: true }))
 }
-function pointerUp(): void {
-  dispatch(window, new PointerEventMock('pointerup', { bubbles: true }))
+function pointerUp(pointerId = 7): void {
+  dispatch(window, new PointerEventMock('pointerup', { pointerId, bubbles: true }))
 }
-function pointerCancel(): void {
-  dispatch(window, new PointerEventMock('pointercancel', { bubbles: true }))
+function pointerCancel(pointerId = 7): void {
+  dispatch(window, new PointerEventMock('pointercancel', { pointerId, bubbles: true }))
 }
-function lostPointerCapture(element: Element): void {
-  dispatch(element, new Event('lostpointercapture', { bubbles: true }))
+function lostPointerCapture(element: Element, pointerId = 7): void {
+  dispatch(element, new PointerEventMock('lostpointercapture', { pointerId, bubbles: true }))
 }
 function click(element: Element): void {
   dispatch(element, new MouseEvent('click', { bubbles: true }))
@@ -543,6 +545,43 @@ describe('WP4 pointer 拖动', () => {
     pointerUp()
     expect(mocks.patch).toHaveBeenCalledTimes(1)
   })
+
+  it('R-11：不同 pointerId 的第二指针 move/up/cancel 不干扰当前拖动', async () => {
+    await renderPane(1000)
+    pointerDown(separatorEl(), 500, 7)
+
+    // 第二指针（pointerId 99）的事件全部被过滤
+    pointerMove(600, 99)
+    expect(paneWidth()).toBe('260px')
+    pointerUp(99)
+    expect(mocks.patch).not.toHaveBeenCalled()
+    expect(mocks.released).toEqual([])
+    pointerCancel(99)
+    expect(paneWidth()).toBe('260px')
+
+    // 原指针（7）继续正常拖动与收敛
+    pointerMove(600, 7)
+    expect(paneWidth()).toBe('360px')
+    pointerUp(7)
+    expect(mocks.patch).toHaveBeenCalledTimes(1)
+    expect(mocks.patch).toHaveBeenCalledWith('/settings', { collectionSidebarWidth: 360 })
+    expect(mocks.released).toEqual([7])
+  })
+
+  it('R-11：不同 pointerId 的 lostpointercapture 不误收敛', async () => {
+    await renderPane(1000)
+    pointerDown(separatorEl(), 500, 7)
+    pointerMove(540, 7)
+    expect(paneWidth()).toBe('300px')
+
+    lostPointerCapture(separatorEl(), 99) // 无关指针丢失：不收敛当前拖动
+    expect(mocks.patch).not.toHaveBeenCalled()
+    expect(paneWidth()).toBe('300px')
+
+    lostPointerCapture(separatorEl(), 7) // 当前指针丢失：等价 pointerup 收敛
+    expect(mocks.patch).toHaveBeenCalledTimes(1)
+    expect(mocks.patch).toHaveBeenCalledWith('/settings', { collectionSidebarWidth: 300 })
+  })
 })
 
 // ==================================================================
@@ -559,6 +598,7 @@ describe('WP4 双击分隔条', () => {
     expect(paneWidth()).toBe('260px')
     expect(mocks.patch).toHaveBeenCalledTimes(1)
     expect(mocks.patch).toHaveBeenCalledWith('/settings', { collectionSidebarWidth: 260 })
+    await act(async () => {}) // 首个 PATCH settle（真实用户两次双击必跨任务边界）
 
     // viewport=706：渲染 max=220，双击仍持久化偏好域值 260，渲染 220
     fireResize(706)
@@ -601,6 +641,7 @@ describe('WP4 键盘调整 + 300ms debounce', () => {
     })
     expect(mocks.patch).toHaveBeenCalledTimes(1)
     expect(mocks.patch).toHaveBeenCalledWith('/settings', { collectionSidebarWidth: 280 })
+    await act(async () => {}) // 首个 PATCH settle（真实用户两轮连按必跨任务边界）
 
     // 新一轮连按 → 新的一次 debounce
     keyDown(separator, { key: 'ArrowLeft' })
@@ -975,5 +1016,114 @@ describe('WP4 hook 细节', () => {
       await Promise.resolve()
     })
     expect(paneWidth()).toBe('270px') // 用户值优先，不被迟到的 400 覆盖
+  })
+})
+
+// ==================================================================
+// PATCH 单写队列（review R-10/P1）
+// ==================================================================
+
+describe('WP4 R-10：PATCH 单写队列（last-write-wins sequencer）', () => {
+  /** 第 1 个 PATCH 为慢请求（deferred 控制 settle），后续为快请求；issued 记录实际发出顺序。 */
+  function mockPatchSequenced(issued: number[]): { resolveFirst: () => void } {
+    // 注意：resolveFirst 必须惰性委托（let 变量在首次 PATCH 时才被赋值），
+    // 不能在返回对象里存快照函数——解构方拿到的引用需始终指向最新赋值。
+    let resolveDeferred: () => void = () => {}
+    mocks.patch.mockImplementation((_path: string, body: { collectionSidebarWidth: number }) => {
+      issued.push(body.collectionSidebarWidth)
+      if (issued.length === 1) {
+        return new Promise((resolve) => {
+          resolveDeferred = () => resolve({})
+        })
+      }
+      return Promise.resolve({})
+    })
+    return { resolveFirst: () => resolveDeferred() }
+  }
+
+  it('in-flight 期间新值不并发发出；慢 300 settle 后续发快 260，磁盘收敛为最后值', async () => {
+    const issued: number[] = []
+    const { resolveFirst } = mockPatchSequenced(issued)
+    await renderPane(1000)
+
+    // 拖动 → pointerup：PATCH(300) 空闲直发，但 settle 慢
+    pointerDown(separatorEl(), 500)
+    pointerMove(540)
+    pointerUp()
+    expect(issued).toEqual([300])
+
+    // 双击 → 260：300 in-flight，只入队不并发（消除乱序覆盖窗口）
+    doubleClick(separatorEl())
+    expect(issued).toEqual([300])
+    expect(mocks.patch).toHaveBeenCalledTimes(1)
+
+    // 慢请求 settle → 队列续发 260：发出顺序 = 最后值最后落盘
+    await act(async () => {
+      resolveFirst()
+      await Promise.resolve() // 排空 settle → pump 队列的 microtask
+      await Promise.resolve()
+    })
+    expect(issued).toEqual([300, 260])
+    expect(mocks.patch).toHaveBeenCalledTimes(2)
+    expect(paneWidth()).toBe('260px')
+  })
+
+  it('排队期间多个新值互相覆盖：settle 后只补发最新一个', async () => {
+    useFakeTimersScoped()
+    const issued: number[] = []
+    const { resolveFirst } = mockPatchSequenced(issued)
+    await renderPane(1000)
+
+    pointerDown(separatorEl(), 500)
+    pointerMove(540)
+    pointerUp() // PATCH(300) in-flight（慢）
+    expect(issued).toEqual([300])
+
+    // 两轮键盘 debounce 到期：310 入队后被 320 覆盖
+    keyDown(separatorEl(), { key: 'ArrowRight' }) // rendered 310
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_PERSIST_DEBOUNCE_MS)
+    })
+    expect(issued).toEqual([300]) // 310 只入队，不并发
+    keyDown(separatorEl(), { key: 'ArrowRight' }) // rendered 320
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_PERSIST_DEBOUNCE_MS)
+    })
+    expect(issued).toEqual([300])
+
+    await act(async () => {
+      resolveFirst()
+      await Promise.resolve() // 排空 settle → pump 队列的 microtask
+      await Promise.resolve()
+    })
+    expect(issued).toEqual([300, 320]) // 只补发最新值一次
+    expect(mocks.patch).toHaveBeenCalledTimes(2)
+    expect(paneWidth()).toBe('320px')
+  })
+
+  it('unmount 时 in-flight PATCH 未 settle：flush 的 debounce 值排队续发不丢失', async () => {
+    useFakeTimersScoped()
+    const issued: number[] = []
+    const { resolveFirst } = mockPatchSequenced(issued)
+    await renderPane(1000)
+
+    keyDown(separatorEl(), { key: 'ArrowRight' }) // 调度 270
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_PERSIST_DEBOUNCE_MS)
+    })
+    expect(issued).toEqual([270]) // PATCH(270) in-flight（慢）
+
+    keyDown(separatorEl(), { key: 'ArrowRight' }) // 280 pending（定时器未到）
+    act(() => root.unmount()) // unmount flush：280 入队
+    unmounted = true
+    expect(issued).toEqual([270]) // in-flight 期间不并发
+
+    await act(async () => {
+      resolveFirst()
+      await Promise.resolve() // 排空 settle → pump 队列的 microtask
+      await Promise.resolve()
+    })
+    expect(issued).toEqual([270, 280]) // 最后一次调整不丢
+    expect(mocks.patch).toHaveBeenCalledTimes(2)
   })
 })

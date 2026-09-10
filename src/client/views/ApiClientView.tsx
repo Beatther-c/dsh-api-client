@@ -19,7 +19,11 @@
  *   key 仍为 draft-N，仅 requestId 指向 Host 记录，不得幽灵存活）；
  * - §0.3：删除 committed 后调 clipboard.notifyLocalRequestsDeleted（Cut 源级联清空）；
  * - §7.5：dirty tab 单独关闭必须经 DirtyTabCloseDialog 确认（P0 无自动保存）；
- * - §4.9：stale 时 Save 禁用、Send/浏览/tab/草稿保留；
+ * - §4.9：stale 时 Save 禁用、Send/浏览/tab/草稿保留；SaveRequestModal 的提交经
+ *   父级注入 callback 走唯一 useCollections 状态机（R-05：不自建第二个 hook 实例，
+ *   杜绝「POST 成功+刷新失败」的 stale 随 Modal 卸载丢失）；
+ * - R-07：openRequest 查重按 key∨requestId 双匹配——保存成功的 draft-key tab
+ *   再被树打开时激活原 tab，不产生双 tab（完整 identity 重构留 P1）；
  * - §6.6/AC-34：编辑器列恒定渲染在 pane 的 main prop，外层不附加 key/条件卸载。
  *
  * 分层纪律（TC-A-03）：本文件不 import 任何 DSH 包；数据全部经 hooks 走
@@ -270,16 +274,22 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
   const openRequest = useCallback(
     (request: ApiRequest): void => {
       setPane('main')
+      // R-07（GPT 裁决 h，本轮最小修复；完整 tab identity 重构留 P1）：查重按
+      // key∨requestId 双匹配——保存成功的草稿 tab key 仍为 draft-N、requestId 指向
+      // 同一 Host 记录；从树再打开必须激活原 tab（其真实 key），绝不产生第二个 tab。
+      const existing = tabsRef.current.find((tab) => tab.key === request.id || tab.requestId === request.id)
       // 规范形落库（base-only url + params 承载 query）的请求在 URL bar 还原完整
       // 显示（paramsToUrl 与 collapseMirroredQuery 互逆，round-trip 幂等）；
       // url 自带 query 的数据（导入/手写合并语义）原样展示。
       const displayUrl =
         request.params.length > 0 && urlToParams(request.url).length === 0 ? paramsToUrl(request.url, request.params) : request.url
       setTabs((prev) => {
-        if (prev.some((tab) => tab.key === request.id)) return prev
+        // 函数式守卫防双击重复（同帧竞态下 tabsRef 可能滞后于 prev）；命中既有 tab
+        // （含 draft-key 形态）时不覆盖其草稿——tab 才是编辑器权威状态。
+        if (prev.some((tab) => tab.key === request.id || tab.requestId === request.id)) return prev
         return [...prev, newTab({ ...request, url: displayUrl, params: [...request.params], headers: [...request.headers] }, request.id)]
       })
-      setActiveKey(request.id)
+      setActiveKey(existing !== undefined ? existing.key : request.id)
       // UX §5 关闭条件：打开 Request → hidden 态 drawer 自动关闭（docked 态无副作用）。
       paneRef.current?.onRequestOpened()
     },
@@ -746,6 +756,8 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
         <SaveRequestModal
           tab={saveModalTab}
           collections={collections.collections}
+          // R-05：提交走父级唯一 useCollections 状态机（mutation/refresh/stale 统一管理）。
+          onSubmit={(collectionId, payload) => collections.saveRequest(collectionId, payload)}
           onCancel={() => setSaveModalTab(undefined)}
           onSaved={(request) => {
             updateTab(saveModalTab.key, (current) => ({
@@ -756,8 +768,8 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
               authDirty: false,
             }))
             setSaveModalTab(undefined)
-            // 保存成功后刷新树（新请求立即可见，无需整页重载）。
-            void collections.refresh()
+            // 树刷新已由父级 runMutation 在 POST 成功后完成（§4.9 单一状态机），
+            // 此处不再重复 GET；刷新失败时 stale 同样落在父级（横幅+禁 mutation）。
             toast.info('请求已保存')
           }}
         />
@@ -799,14 +811,23 @@ const topButtonStyle: CSSProperties = {
   padding: '3px 10px',
 }
 
+/** SaveRequestModal 提交 payload（= useCollections.saveRequest 的 request 入参形态，§5.1 端点 9）。 */
+type SaveRequestPayload = Omit<ApiRequest, 'id' | 'createdAt' | 'updatedAt' | 'collectionId'> & { folderId?: string }
+
 /** Save 到 Collection（含选 folder，§6/TC-UI-13）：草稿携带的 folderId 作为文件夹默认值。 */
 function SaveRequestModal(props: {
   tab: RequestTab
   collections: Collection[]
+  /**
+   * R-05（GPT review P0-blocker）：提交经父级注入的 callback 走**父级唯一**
+   * useCollections 状态机（runMutation 统一管 mutation/refresh/stale）。本组件
+   * 绝不自建第二个 hook 实例——「POST 成功 + 刷新失败」的 stale 若落在临时实例上，
+   * Modal 卸载即丢，主界面会在旧投影上继续放行 mutation（违反 §4.9）。
+   */
+  onSubmit: (collectionId: string, payload: SaveRequestPayload) => Promise<ApiRequest | undefined>
   onCancel: () => void
   onSaved: (request: ApiRequest) => void
 }): ReactElement {
-  const collections = useCollections()
   const [collectionId, setCollectionId] = useState(props.tab.draft.collectionId !== '' ? props.tab.draft.collectionId : (props.collections[0]?.id ?? ''))
   // 树「新建 Request」入口注入的默认文件夹（onNewRequest → blankDraft.folderId）。
   const [folderId, setFolderId] = useState(props.tab.draft.folderId ?? '')
@@ -820,7 +841,7 @@ function SaveRequestModal(props: {
       return
     }
     const draft = props.tab.draft
-    const saved = await collections.saveRequest(collectionId, {
+    const saved = await props.onSubmit(collectionId, {
       name: draft.name,
       method: draft.method,
       // 规范形落库（同步幂等，见 save() 注）。
