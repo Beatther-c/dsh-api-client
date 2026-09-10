@@ -66,9 +66,10 @@ pnpm test     # vitest：19 spec / 209 tests
 
 ## Roadmap
 
-- **V0.1**（当前）：完整 API Client + Agent 工具 + Postman 导入 + 安全体系 + 兼容矩阵
-- **V0.2**：OpenAPI / curl / HAR 导入、Collection Runner、Workbench Embedded Surface Spike
-- **V0.3**：OAuth2、Scripts Sandbox、Tests、Advanced Secret Providers
+- **V0.1**：完整 API Client + Agent 工具 + Postman 导入 + 安全体系 + 兼容矩阵
+- **V0.2**（当前，npm 0.2.0）：常用交互优化 P0——请求树桌面交互（右键菜单/键盘契约/行内重命名）、可调侧栏（三态+drawer+持久化）、自动生成 Header/Query 分层（canonical buildRequestPlan/停用/恒脱敏）、Folder CRUD 与跨集合复制剪切移动（Host 剪贴板+乐观锁）、删除强确认与 tab 一致性
+- **V0.3**：OpenAPI / curl / HAR 导入、Collection Runner、Workbench Embedded Surface Spike、基线文案中文化收尾（R-09）、tab identity 统一、可恢复删除（Undo）
+- **V0.4+**：OAuth2、Scripts Sandbox、Tests、Advanced Secret Providers
 - **V1.0**：GraphQL / WebSocket / gRPC / Mock、插件市场稳定发布、多 profile 兼容
 
 ## License

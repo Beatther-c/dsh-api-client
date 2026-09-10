@@ -1,6 +1,6 @@
 {
   "name": "dsh-api-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent-native API Client for DeepSeek Harness — Postman 级 API 调试 UI + Agent 原生 HTTP 工具 + Postman Collection 导入的 DSH 原生插件",
   "type": "module",
   "license": "MIT",
