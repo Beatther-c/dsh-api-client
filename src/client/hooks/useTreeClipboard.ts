@@ -28,14 +28,17 @@
  * （§4.8 本来就持有节点 id）相同。这是不新增 clipboard status 端点（§0.3 冻结）
  * 前提下实现该条款的唯一途径。
  *
- * mutation 流程分工（R-08，GPT review 裁决）：
+ * mutation 流程分工（R-08 + loop2 残留修复，GPT review 裁决）：
  * - **paste**（唯一的树数据 mutation）走 useCollections.runMutation（bridge 注入）：
  *   成功 → await GET /collections 刷新投影；409 → stale=true + Host message toast；
  *   刷新失败 → stale +「数据已保存，列表刷新失败」（§4.9 全流程）；
  * - **copy/cut** 只创建 Host 内存 clipboard entry、不改任何 Collection 数据——
- *   直调 clipboard 端点（自管 pending 与错误 toast），成功后**不刷新投影**、
- *   失败后**不置 stale**（假 stale 会错误阻断后续 paste）；Cut 的 source-version
- *   409 单独给 Host 逐字冲突文案。
+ *   直调 clipboard 端点（自管 pending 与错误 toast），成功后**不刷新投影**；
+ *   copy 失败永不置 stale（copy 端点无版本前置、不存在 409）；
+ * - **cut 的 source-version 409**（§3.1.1 冻结条件：cut.requestUpdatedAt /
+ *   cut.sourceCollectionUpdatedAt 不符）→ 必须置树 stale「直到重新成功刷新」：
+ *   经 bridge.runMutation 以合成 rejection 路由到 §4.9 同一冲突出口
+ *   （stale=true + Host 逐字文案、失败分支零刷新），冲突处理单点收敛。
  *
  * 本文件不 import 任何 DSH 包（TC-A-03）。
  */
@@ -114,7 +117,11 @@ export function buildPasteBody(target: PasteTarget): Record<string, unknown> {
   }
 }
 
-/** useCollections 注入的 §4.9 统一 mutation 流程（409→stale+toast；成功→refresh；刷新失败→stale+固定文案）。 */
+/**
+ * useCollections 注入的 §4.9 统一 mutation 流程：paste 数据 mutation 全流程复用
+ * （成功→刷新；409→stale+Host 逐字文案；刷新失败→stale+「数据已保存，列表刷新失败」）；
+ * cut 的 source-version 409 以合成 rejection 路由到同一冲突出口（失败分支零刷新）。
+ */
 export interface TreeClipboardBridge {
   runMutation: <T>(action: () => Promise<T>) => Promise<MutationRun<T>>
 }
@@ -222,7 +229,7 @@ export function useTreeClipboard(bridge: TreeClipboardBridge): TreeClipboardApi 
     async (source: CutSource): Promise<boolean> => {
       if (!beginOperation()) return false
       try {
-        // R-08：同 copy——clipboard 端点直调，不刷新投影、不置 stale。
+        // R-08：同 copy——clipboard 端点直调，成功后不刷新投影。
         const descriptor = await api.post<TreeClipboardDescriptor>('/tree/clipboard/cut', {
           requestId: source.requestId,
           requestUpdatedAt: source.requestUpdatedAt,
@@ -233,16 +240,26 @@ export function useTreeClipboard(bridge: TreeClipboardBridge): TreeClipboardApi 
         toast.info('已剪切，粘贴到目标位置完成移动')
         return true
       } catch (err) {
-        // Cut 的 source-version 409：单独给 Host 逐字冲突文案（§3.1.1）——
-        // 不置 stale（clipboard 操作不改树数据），用户重新剪切或刷新后重试。
-        if (isConflict(err)) toast.error(err instanceof HostApiError ? err.message : hostErrorMessage(err))
-        else toast.error(hostErrorMessage(err))
+        if (isConflict(err)) {
+          // R-08 残留修复（GPT 复审裁决）：§3.1.1 把 cut.requestUpdatedAt /
+          // cut.sourceCollectionUpdatedAt 列入冻结 409 条件，且 409 后果清单要求
+          // 「Client 将树标记为 stale，直到重新成功刷新」（§4.9 同：mutation 失败
+          // 409 → stale=true）。实现：经 bridge.runMutation 的 §4.9 冲突出口路由——
+          // 合成 rejection 走与数据 mutation 完全相同的 isConflict 分支：
+          // stale=true + Host 逐字冲突文案 toast，失败分支零刷新（无额外 GET）。
+          // 冲突处理保持全应用单点收敛（useCollections.runMutation），不重复 toast，
+          // 且既有接线 { runMutation: collections.runMutation } 无需任何改动。
+          await bridge.runMutation<never>(() => Promise.reject(err))
+        } else {
+          // 非 409（404 request-not-found / 400 等）：只 toast，不置 stale。
+          toast.error(hostErrorMessage(err))
+        }
         return false
       } finally {
         endOperation()
       }
     },
-    [api, beginOperation, endOperation, updateClipboard],
+    [api, beginOperation, bridge, endOperation, updateClipboard],
   )
 
   /** 本地清空 + best-effort Host DELETE（幂等；失败静默）。 */

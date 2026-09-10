@@ -1210,7 +1210,7 @@ describe('useTreeClipboard（mock fetch）：四字段状态、Cut 源删除清�
     expect(toastMocks.info).toHaveBeenCalledWith('已复制，可粘贴到目标位置')
   })
 
-  it('R-08：cut 源版本 409 → Host 逐字冲突文案，不置 stale、零额外 GET', async () => {
+  it('R-08 残留修复（loop2）：cut 源版本 409 → 树 stale（§3.1.1/§4.9）+ Host 逐字冲突文案 + 零额外 GET；refresh 成功后 stale 清除', async () => {
     let getCount = 0
     routeFetch([
       [
@@ -1230,8 +1230,47 @@ describe('useTreeClipboard（mock fetch）：四字段状态、Cut 源删除清�
     expect(cut).toBe(false)
     expect(captured!.clipboard).toBeUndefined()
     expect(toastMocks.error).toHaveBeenCalledWith('数据已被其他操作修改，请刷新后重试')
-    expect(capturedCollections!.stale).toBe(false) // 修复前：runMutation 把 clipboard 409 打成树 stale，阻断后续 paste
+    // §3.1.1 把 cut.requestUpdatedAt/sourceCollectionUpdatedAt 列入冻结 409 条件，
+    // 409 后果清单要求「Client 将树标记为 stale，直到重新成功刷新」——loop1 误固化
+    // 为 stale=false，本断言为 GPT 复审裁决后的纠正。
+    expect(capturedCollections!.stale).toBe(true)
+    // 失败分支零刷新：GET 仅初始加载 1 次。
     expect(getCount).toBe(1)
+    // stale 清除路径不回归：refresh() 成功 → stale=false（第二次 GET）。
+    await act(async () => {
+      expect(await capturedCollections!.refresh()).toBe(true)
+    })
+    expect(capturedCollections!.stale).toBe(false)
+    expect(getCount).toBe(2)
+  })
+
+  it('R-08 边界（loop2 勿扩大）：cut 非 409 失败（404 request-not-found）→ 只 toast 不置 stale；copy 失败永不置 stale', async () => {
+    let getCount = 0
+    routeFetch([
+      [
+        /GET .*\/collections$/,
+        () => {
+          getCount += 1
+          return mockResponse(200, fixture())
+        },
+      ],
+      [/POST .*\/tree\/clipboard\/cut$/, () => mockResponse(404, { error: { code: 'request-not-found', message: 'request not found: r1' } })],
+      [/POST .*\/tree\/clipboard\/copy$/, () => mockResponse(404, { error: { code: 'collection-not-found', message: 'collection not found: c-x' } })],
+    ])
+    await renderCombinedHook()
+    let cut = true
+    await act(async () => {
+      cut = await captured!.cut({ requestId: 'r1', requestUpdatedAt: 100, sourceCollectionUpdatedAt: 1000 })
+    })
+    expect(cut).toBe(false)
+    expect(capturedCollections!.stale).toBe(false) // 404 不是版本冲突 → 不 stale（§4.9 仅 409）
+    let copied = true
+    await act(async () => {
+      copied = await captured!.copy({ kind: 'collection', collectionId: 'c-x' })
+    })
+    expect(copied).toBe(false)
+    expect(capturedCollections!.stale).toBe(false) // copy 无版本前置，失败永不 stale
+    expect(getCount).toBe(1) // 全程零刷新
   })
 
   it('R-08 对照：paste 仍走 runMutation——成功后刷新投影（第二次 GET），copy 后不刷新', async () => {
