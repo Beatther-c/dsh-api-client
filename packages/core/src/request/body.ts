@@ -19,6 +19,40 @@ export function generateBoundary(): string {
   return `----dsh-api-client-${crypto.randomUUID().replaceAll('-', '')}`
 }
 
+/**
+ * P0 §5.7：form-data 的 boundary 预览占位符——preview 不生成假的随机最终值
+ * 供用户误认为实际 wire 值（UX §9：multipart boundary 必须由真实编码器生成，
+ * UI 不写死或提前伪造）。
+ */
+export const MULTIPART_BOUNDARY_PLACEHOLDER = '<发送时生成>'
+
+/** multipart Content-Type 模板：preview 占位与 Send 实际 boundary 共用的单一出口，防止映射漂移。 */
+export function multipartContentType(boundary: string): string {
+  return `multipart/form-data; boundary=${boundary}`
+}
+
+/**
+ * Body 形态 → Generated Content-Type（P0 §5.7 冻结映射，canonical plan 的 Body
+ * contribution 单一事实源）：none 无贡献；raw→text/plain；json→application/json；
+ * urlencoded→application/x-www-form-urlencoded；form-data→带占位 boundary 的
+ * multipart（真实 boundary 发送时由 serializeBody 同一次编码生成并同时写入
+ * body 与 Content-Type，§5.7）。
+ */
+export function bodyContentType(body: BodyConfig): string | undefined {
+  switch (body.type) {
+    case 'none':
+      return undefined
+    case 'raw':
+      return 'text/plain'
+    case 'json':
+      return 'application/json'
+    case 'urlencoded':
+      return 'application/x-www-form-urlencoded'
+    case 'form-data':
+      return multipartContentType(MULTIPART_BOUNDARY_PLACEHOLDER)
+  }
+}
+
 function serializeFormData(fields: KeyValue[], boundary: string): string {
   const parts = enabledFields(fields).map(
     (f) => `--${boundary}\r\nContent-Disposition: form-data; name="${f.key.replaceAll('"', '\\"')}"\r\n\r\n${f.value}\r\n`,
@@ -49,19 +83,21 @@ export function serializeBody(body: BodyConfig, options?: SerializeBodyOptions):
     case 'none':
       return {}
     case 'raw':
-      return { data: body.raw, contentType: 'text/plain' }
+      return { data: body.raw, contentType: bodyContentType(body) }
     case 'json':
-      return { data: body.json, contentType: 'application/json' }
+      return { data: body.json, contentType: bodyContentType(body) }
     case 'urlencoded':
       return {
         data: serializeUrlencoded(body.fields),
-        contentType: 'application/x-www-form-urlencoded',
+        contentType: bodyContentType(body),
       }
     case 'form-data': {
+      // P0 §5.7：Send 时同一次编码生成 boundary，并同时写入 body 与 Content-Type
+      //（真实 echo 测试 tests/p0-undici-wire.spec.ts 断言二者一致）。
       const boundary = options?.boundary ?? generateBoundary()
       return {
         data: serializeFormData(body.fields, boundary),
-        contentType: `multipart/form-data; boundary=${boundary}`,
+        contentType: multipartContentType(boundary),
       }
     }
   }

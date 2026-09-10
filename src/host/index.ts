@@ -36,6 +36,7 @@ import { NetworkPolicyService } from './services/network-policy-service.ts'
 import { AuditService } from './services/audit-service.ts'
 import { ImportService } from './services/import-service.ts'
 import { ExecutionService } from './services/execution-service.ts'
+import { TreeClipboardService } from './services/tree-clipboard-service.ts'
 import { ApiRouter } from './api/router.ts'
 import type { WebServerLike } from './api/router.ts'
 import { authenticateRequest } from './api/auth.ts'
@@ -43,6 +44,8 @@ import type { PluginAuthConfig } from './api/auth.ts'
 import { registerCapabilitiesRoutes } from './api/capabilities.ts'
 import { registerCollectionRoutes } from './api/collections.ts'
 import { registerRequestRoutes } from './api/requests.ts'
+import { registerFolderRoutes } from './api/folders.ts'
+import { registerTreeClipboardRoutes } from './api/tree-clipboard.ts'
 import { registerEnvironmentRoutes } from './api/environment.ts'
 import { registerExecuteRoutes } from './api/execute.ts'
 import { registerHistoryRoutes } from './api/history.ts'
@@ -89,6 +92,8 @@ export interface HostServices {
   audit: AuditService
   imports: ImportService
   execution: ExecutionService
+  /** P0 树剪贴板（实施设计 §4.2）：内存权威快照 + token，WP3 独占装配。 */
+  treeClipboard: TreeClipboardService
 }
 
 /**
@@ -118,10 +123,12 @@ export function createHostServices(options: { dshHome: string; profile: ProfileS
     settings,
     profile,
   })
-  return { store, profile, redaction, secrets, environments, collections, settings, networkPolicy, history, audit, imports, execution }
+  // P0 WP3：树剪贴板（token 绑定 profileId；内存 Map，绝不落盘，§4.2）。
+  const treeClipboard = new TreeClipboardService(collections, profile)
+  return { store, profile, redaction, secrets, environments, collections, settings, networkPolicy, history, audit, imports, execution, treeClipboard }
 }
 
-/** §5.1 全部 28 端点注册（index.ts 与 tests 共用此唯一注册点）。 */
+/** §5.1 全部端点 + P0 §3.1 新增（Folder 三端点 / clipboard 四端点）注册（index.ts 与 tests 共用此唯一注册点）。 */
 export function registerHostApi(api: ApiRouter, services: HostServices): void {
   registerCapabilitiesRoutes(api, services.profile, {
     version: PLUGIN_VERSION,
@@ -137,6 +144,8 @@ export function registerHostApi(api: ApiRouter, services: HostServices): void {
   })
   registerCollectionRoutes(api, services.collections, services.redaction)
   registerRequestRoutes(api, services.collections, services.redaction)
+  registerFolderRoutes(api, services.collections)
+  registerTreeClipboardRoutes(api, services.treeClipboard)
   registerEnvironmentRoutes(api, services.environments, services.redaction)
   registerExecuteRoutes(api, services.execution)
   registerHistoryRoutes(api, services.history)

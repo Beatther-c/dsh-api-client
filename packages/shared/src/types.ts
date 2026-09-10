@@ -1,6 +1,8 @@
 /**
  * §4.1 实体 TS 接口（逐字段照抄 V01_IMPLEMENTATION_DESIGN §4.1）。
  * 纯类型定义，零运行时依赖，零 DSH/React import（AC-40 / TC-A-02）。
+ * P0「常用交互优化」新增类型逐字照抄 docs/design/api-client-everyday-ux-p0-implementation-design.md
+ *（下文注释标「P0 §x」的均指该文档章节）。
  */
 
 // ---- 基础 ----
@@ -37,6 +39,54 @@ export interface ScriptConfig {
   warning: string // 「V0.1 不执行脚本」标准警告
 }
 
+// ---- Generated Header suppression（P0 §4.1.1）----
+/** 可抑制的 Generated Header 来源：仅 body（Content-Type）与 client-default（Accept）；auth/runtime 不提供抑制（P0 §5.8）。 */
+export type SuppressibleGeneratedHeaderSource = 'body' | 'client-default'
+
+export interface SuppressedGeneratedHeader {
+  name: string
+  source: SuppressibleGeneratedHeaderSource
+}
+
+// ---- Generated Preview（P0 §4.1.2，canonical buildRequestPlan 的只读投影）----
+export type GeneratedItemSource = 'body' | 'auth' | 'client-default' | 'runtime'
+
+export type GeneratedItemStatus =
+  | 'active'
+  | 'overridden'
+  | 'suppressed'
+  | 'runtime-pending'
+  | 'invalid-user-override'
+
+/**
+ * 敏感项（sensitive=true）valuePreview 恒为 `••••••••`；
+ * 真实值不得额外放进任何隐藏属性或 title（秘密边界红线）。
+ */
+export interface GeneratedHeaderPreview {
+  name: string
+  valuePreview: string
+  source: GeneratedItemSource
+  status: GeneratedItemStatus
+  sensitive: boolean
+  suppressible: boolean
+}
+
+/** Query API Key 预览（P0 §5.6）：source 恒为 'auth'，恒敏感，valuePreview 永远 `••••••••`。 */
+export interface GeneratedQueryPreview {
+  name: string
+  valuePreview: string
+  source: 'auth'
+  status: 'active' | 'overridden'
+  sensitive: true
+}
+
+export interface RequestPlanPreview {
+  headers: GeneratedHeaderPreview[]
+  query: GeneratedQueryPreview[]
+  preSendHeaderCount: number
+  runtimeHeaderCount: number
+}
+
 // ---- Request / Collection（§17）----
 export interface ApiRequest {
   id: string
@@ -47,6 +97,12 @@ export interface ApiRequest {
   headers: KeyValue[]
   auth: AuthConfig
   body: BodyConfig
+  /**
+   * 用户手动抑制的 Generated Header 清单（P0 §4.1.1）。optional 是为了旧
+   * collections.json 向后兼容（不做启动期全量重写）；读取语义
+   * `request.suppressedGeneratedHeaders ?? []`；新建/保存过的 Request 写出规范化数组。
+   */
+  suppressedGeneratedHeaders?: SuppressedGeneratedHeader[]
   scripts?: ScriptConfig
   collectionId: string
   folderId?: string
@@ -76,6 +132,25 @@ export interface CollectionVariable {
   key: string
   value: string
   enabled: boolean
+}
+
+// ---- Tree clipboard（P0 §3.1 冻结合同）----
+/**
+ * copy/cut 受理回执，clipboard API 唯一返回形态：绝不含 name/URL/Body/Header/
+ * Auth/SecretRef/源节点完整 ID 链/节点 snapshot（Host snapshot 不下发给 Client）。
+ */
+export interface TreeClipboardDescriptor {
+  token: string
+  operation: 'copy' | 'cut'
+  kind: 'collection' | 'folder' | 'request'
+  expiresAt: number
+}
+
+/** paste 结果：Copy 成功 consumed=false（snapshot 保留，可重复粘贴）；Cut 成功 consumed=true（token 一次性消费）。 */
+export interface TreePasteResult {
+  operation: 'copy' | 'cut'
+  kind: 'collection' | 'folder' | 'request'
+  consumed: boolean
 }
 
 // ---- Environment / Variable（§9 + REVIEW 中级 #1 修订）----
@@ -247,6 +322,8 @@ export interface PluginSettings {
   agentPermission: AgentPermissionPolicy
   secretsDisplayPolicy: 'masked' // V0.1 仅此值；reveal 见 §8.1
   postmanCompatibility: 'strict' | 'lenient'
+  /** 请求树侧栏宽度（P0 §4.1.3）：默认 260，Host validator 钳制 220–520 整数；旧 settings 文件缺字段时由 DEFAULT_PLUGIN_SETTINGS 自动补齐。 */
+  collectionSidebarWidth: number
   activeEnvironmentId?: string // Human UI 当前环境（client 选择状态的持久化）
 }
 

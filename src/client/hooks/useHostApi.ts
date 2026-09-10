@@ -51,7 +51,13 @@ export interface HostApiClient {
   post<T>(path: string, body?: unknown): Promise<T>
   patch<T>(path: string, body?: unknown): Promise<T>
   put<T>(path: string, body?: unknown): Promise<T>
-  delete(path: string): Promise<void>
+  /**
+   * P0 扩展（实施设计 §2.2/§3.1）：DELETE 支持可选 JSON body——Folder 递归删除端点
+   * `DELETE /collections/:id/folders/:folderId` 的 `expectedCollectionUpdatedAt` 走
+   * body（router ctx.json() 支持 DELETE 带 body）。不传 body 时与旧行为完全一致
+   *（无 content-type、无请求体），既有调用面零变化。
+   */
+  delete(path: string, body?: unknown): Promise<void>
 }
 
 function normalizeErrorBody(status: number, payload: unknown): HostApiError {
@@ -111,8 +117,8 @@ export function createHostApi(): HostApiClient {
     post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
     patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
     put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
-    delete: async (path: string) => {
-      await request<undefined>('DELETE', path)
+    delete: async (path: string, body?: unknown) => {
+      await request<undefined>('DELETE', path, body)
     },
   }
 }

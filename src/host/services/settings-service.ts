@@ -35,6 +35,7 @@ export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
   agentPermission: { highRiskMethodsRequireApproval: true, hostRules: [] },
   secretsDisplayPolicy: 'masked',
   postmanCompatibility: 'lenient',
+  collectionSidebarWidth: 260,
 }
 
 /** settings patch 校验失败（api 层转 400，TC-API-12）。 */
@@ -157,6 +158,7 @@ const SETTINGS_VALIDATORS: Record<keyof PluginSettings, Validator> = {
   agentPermission: (value, path, issues) => validateObjectFields(value, path, AGENT_PERMISSION_VALIDATORS, issues),
   secretsDisplayPolicy: enumValue(['masked']),
   postmanCompatibility: enumValue(['strict', 'lenient']),
+  collectionSidebarWidth: rangedNumber(220, 520, true),
   activeEnvironmentId: validateString,
 }
 

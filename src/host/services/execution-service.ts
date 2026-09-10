@@ -104,6 +104,12 @@ export class ExecutionService {
       headers: input.headers ?? [],
       auth: input.auth ?? { type: 'none' },
       body: input.body ?? { type: 'none' },
+      // P0 §4.1.1/§13.4：adhoc request 投影保留 suppressedGeneratedHeaders 传入
+      // canonical plan（读取侧由 plan 做宽容规范化；写入侧严格校验属 request
+      // mutation 端点职责，§3.3）。
+      ...(input.suppressedGeneratedHeaders !== undefined
+        ? { suppressedGeneratedHeaders: input.suppressedGeneratedHeaders }
+        : {}),
       ...(input.scripts !== undefined ? { scripts: input.scripts } : {}),
       collectionId: input.collectionId ?? '',
       ...(input.folderId !== undefined ? { folderId: input.folderId } : {}),

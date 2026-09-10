@@ -1,6 +1,7 @@
 /**
  * §12 十二步执行流编排（§3.2 executor/executor）：
- * resolve → auth → build → permission → network-policy → execute → 计时 → parse → history → events。
+ * plan（resolve + auth + build，P0 §5 canonical buildRequestPlan）→ permission →
+ * network-policy → execute → 计时 → parse → history → events。
  *
  * - Human Send 与 Agent Tool 共用本入口（§13.8，无双套 HTTP client）；
  * - secret 解析依赖（resolveSecret）以接口注入——core 不碰存储（§4.3）；
@@ -17,9 +18,8 @@ import type {
   ResolvedRequest,
   SecretRef,
 } from '@dsh-api-client/shared'
-import { resolveRequest } from '../variables/resolver.ts'
-import type { SecretResolver } from '../variables/resolver.ts'
-import { applyAuth, resolveInheritedAuth } from '../auth/apply.ts'
+import { buildRequestPlan } from '../request/plan.ts'
+import type { SecretResolver } from '../request/plan.ts'
 import { DEFAULT_NETWORK_POLICY, evaluateNetworkPolicy } from '../security/network-policy.ts'
 import type { PolicyEvaluator } from './http-client.ts'
 import { executeHttp } from './http-client.ts'
@@ -108,23 +108,21 @@ export async function executeRequest(request: ApiRequest, options: ExecuteOption
     : undefined
 
   try {
-    // 1. Resolve variables（URL/params/headers/body 模板解析 + build，优先级链见 resolver）
-    const resolutionContext: Parameters<typeof resolveRequest>[1] = {}
-    if (options.local !== undefined) resolutionContext.local = options.local
-    if (options.environment !== undefined) resolutionContext.environment = options.environment
-    if (options.collection !== undefined) resolutionContext.collectionVariables = options.collection.variables
-    if (trackingResolveSecret !== undefined) resolutionContext.resolveSecret = trackingResolveSecret
-    let resolved = await resolveRequest(request, resolutionContext)
-    emit('resolved')
-
-    // 2. Apply auth（inherit 链先消解；材料可为 SecretRef）
-    const effectiveAuth = resolveInheritedAuth(request, options.collection)
-    resolved = await applyAuth(effectiveAuth, resolved, {
-      ...(trackingResolveSecret !== undefined ? { resolveSecret: trackingResolveSecret } : {}),
+    // 1–5. Canonical plan（P0 §5.1/§5.2/§13.4）：resolve → auth → build 一次经唯一
+    //      合并 primitive 完成——executor 不再形成第二套 Auth append / Header 合并。
+    //      事件序列保持十二步历史形态：三个事件现在于同一 primitive 完成后相邻
+    //      触发（语义 = 变量解析完成 / auth 贡献已合并 / wire 形态已落定）。
+    const plan = await buildRequestPlan(request, {
+      mode: 'resolved',
+      local: options.local,
+      environment: options.environment,
+      collection: options.collection,
+      resolveSecret: trackingResolveSecret,
     })
+    const resolved = plan.resolved
+    const effectiveAuth = plan.effectiveAuth
+    emit('resolved')
     emit('auth-applied')
-
-    // 3–5. Build URL / headers / body —— 在 resolver 内随解析一并落定（buildUrl/buildHeaders/serializeBody）
     emit('built')
 
     // 6. Permission check（§24.5 挂接点，发起连接之前）

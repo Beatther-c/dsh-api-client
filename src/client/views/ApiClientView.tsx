@@ -1,14 +1,32 @@
 /**
- * ApiClientView（§4 主页面布局）：
- * 顶栏（History / Import / Environment + 环境切换）+ CollectionTree +
- * RequestTabs + MethodSelector/UrlBar/Send/Save + Params/Headers/Auth/Body/Scripts
- * 编辑器 + ResponseViewer。
+ * ApiClientView（§4 主页面布局；WP8 最终汇聚）：
+ * 顶栏（历史 / 导入 / 环境 + 环境切换）+ ResizableCollectionPane（请求树 ⇆ 编辑器列，
+ * 三态/drawer 不重挂载）+ RequestTabs + MethodSelector/UrlBar/Send/Save +
+ * Params/Headers/Auth/Body/Scripts 编辑器 + ResponseViewer +
+ * 删除确认（TreeDeleteConfirmDialog）/ dirty tab 关闭确认（DirtyTabCloseDialog）。
+ *
+ * 汇聚纪律（§10 WP8「只做汇聚，不重新实现子包算法」）：
+ * paste legality matrix → useTreeClipboard；request-plan priority → plan preview
+ * （Headers/Params 编辑器内部消费）；tree projection search → tree-projection；
+ * sidebar clamp math → ResizableCollectionPane/useCollectionSidebarWidth；
+ * tab-selection algorithm → tab-lifecycle.removeTabsAndSelectNext；
+ * 删除递归统计 → core 权威版 countFolderDescendants/countCollectionRequests（WP1）。
+ *
+ * 一致性契约：
+ * - §7.3：树删除必须 await Host DELETE，committed 之后才 removeTabsAndSelectNext；
+ *   committed=false → tree/tabs/activeKey 全不动（失败 toast 由 useCollections 统一发）；
+ *   受影响 tab 按 key∨requestId 双匹配后映射回 tab.key（R3：保存成功的草稿 tab
+ *   key 仍为 draft-N，仅 requestId 指向 Host 记录，不得幽灵存活）；
+ * - §0.3：删除 committed 后调 clipboard.notifyLocalRequestsDeleted（Cut 源级联清空）；
+ * - §7.5：dirty tab 单独关闭必须经 DirtyTabCloseDialog 确认（P0 无自动保存）；
+ * - §4.9：stale 时 Save 禁用、Send/浏览/tab/草稿保留；
+ * - §6.6/AC-34：编辑器列恒定渲染在 pane 的 main prop，外层不附加 key/条件卸载。
  *
  * 分层纪律（TC-A-03）：本文件不 import 任何 DSH 包；数据全部经 hooks 走
  * Host API（Host 为权威状态源，client 只做投影——D16）；URL↔Params 双向同步、
  * 参数编码等复用 core request/build 纯函数。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactElement } from 'react'
 import type {
   ApiRequest,
@@ -22,14 +40,24 @@ import type {
   SafeApiDebugContext,
 } from '@dsh-api-client/shared'
 import { collapseMirroredQuery, paramsToUrl, serializeParams, urlToParams } from '../../../packages/core/src/request/build.ts'
+import { countCollectionRequests, countFolderDescendants } from '../../../packages/core/src/collection/ops.ts'
 import type { BuildSafeApiDebugContextInput } from '../../../packages/core/src/security/redactor.ts'
 import { buildSafeApiDebugContext } from '../../../packages/core/src/security/redactor.ts'
+import type { MutationOutcome } from '../hooks/useCollections.ts'
 import { useCollections } from '../hooks/useCollections.ts'
 import { useEnvironments } from '../hooks/useEnvironments.ts'
 import { useExecute } from '../hooks/useExecute.ts'
 import { useHostApi } from '../hooks/useHostApi.ts'
+import { useTreeClipboard } from '../hooks/useTreeClipboard.ts'
 import { CollectionTree } from '../components/collection/CollectionTree.tsx'
+import type { CollectionTreeHandlers, TreeDeleteTarget } from '../components/collection/CollectionTree.tsx'
+import { ResizableCollectionPane } from '../components/collection/ResizableCollectionPane.tsx'
+import type { ResizableCollectionPaneHandle } from '../components/collection/ResizableCollectionPane.tsx'
+import { TreeDeleteConfirmDialog } from '../components/collection/TreeDeleteConfirmDialog.tsx'
+import { collectSubtreeRequestIds } from '../components/collection/tree-projection.ts'
 import { RequestTabs } from '../components/request/RequestTabs.tsx'
+import { DirtyTabCloseDialog } from '../components/request/DirtyTabCloseDialog.tsx'
+import { removeTabsAndSelectNext } from '../components/request/tab-lifecycle.ts'
 import { MethodSelector } from '../components/request/MethodSelector.tsx'
 import { UrlBar } from '../components/request/UrlBar.tsx'
 import { ParamsEditor } from '../components/request/ParamsEditor.tsx'
@@ -97,10 +125,11 @@ const EDITOR_TABS: ReadonlyArray<{ value: EditorTab; label: string }> = [
 
 let tabSeq = 1
 
-function blankDraft(collectionId?: string): ApiRequest {
+/** 新草稿：folderId 由树「新建 Request」入口注入（SaveRequestModal 的文件夹默认值）。 */
+function blankDraft(collectionId?: string, folderId?: string): ApiRequest {
   return {
     id: '',
-    name: 'Untitled Request',
+    name: '未命名请求',
     method: 'GET',
     url: '',
     params: [],
@@ -108,6 +137,7 @@ function blankDraft(collectionId?: string): ApiRequest {
     auth: { type: 'none' },
     body: { type: 'none' },
     collectionId: collectionId ?? '',
+    ...(folderId !== undefined && folderId !== '' ? { folderId } : {}),
     createdAt: 0,
     updatedAt: 0,
   }
@@ -132,22 +162,50 @@ function flattenFolders(folders: Folder[], prefix: string, out: FolderOption[]):
   }
 }
 
-/** CollectionSummary.requestCount（§4.1）：顶层 + 任意嵌套 folder 的请求总数。 */
-function countCollectionRequests(collection: Collection): number {
-  let count = collection.requests.length
-  const walk = (folders: Folder[]): void => {
-    for (const folder of folders) {
-      count += folder.requests.length
-      walk(folder.folders)
-    }
+/** 删除确认框的展示统计（§7.1；递归数字来自 core 权威纯函数，dirty 数来自当前 tabs）。 */
+interface DeleteStats {
+  name: string
+  /** kind='folder'：递归后代子文件夹数（目标本身不计入）。 */
+  descendantFolderCount?: number
+  /** kind='folder'：递归请求数；kind='collection'：递归 Request 总数。 */
+  requestCount?: number
+  /** 受影响 tab 中 dirty 的数量（§7.2）。 */
+  dirtyTabCount: number
+}
+
+/**
+ * R3（draft-key 幽灵 tab）：tab 是否受「被删 request id 集合」影响。
+ * 已保存 tab 的 key=requestId 直接命中；经 SaveRequestModal 保存成功的草稿 tab
+ * key 仍为 `draft-N`（仅 requestId 指向 Host 记录），必须再按 requestId 匹配——
+ * 删除流把受影响 tab 统一映射回 tab.key 后才交给 removeTabsAndSelectNext
+ * （纯函数按 key 匹配是 WP6 冻结契约，draft-key 适配责任在汇聚层）。
+ */
+function tabAffectedByDeletion(tab: RequestTab, deletedRequestIds: readonly string[]): boolean {
+  return deletedRequestIds.includes(tab.key) || (tab.requestId !== undefined && deletedRequestIds.includes(tab.requestId))
+}
+
+/**
+ * §7.1 删除统计（§13.3：Client 根据当前 projection 统计 subtree + dirty tabs）：
+ * request → 名称；folder → countFolderDescendants（folderCount 不含自身）；
+ * collection → countCollectionRequests；dirtyTabCount = 受影响 tab（key∨requestId
+ * 双匹配，R3）中 dirty 的数量。递归算法一律消费 core 权威版（WP1）。
+ */
+function computeDeleteStats(target: TreeDeleteTarget, tabs: readonly RequestTab[]): DeleteStats {
+  const affected = collectSubtreeRequestIds(target)
+  const dirtyTabCount = tabs.filter((tab) => tab.dirty && tabAffectedByDeletion(tab, affected)).length
+  if (target.kind === 'request') return { name: target.request.name, dirtyTabCount }
+  if (target.kind === 'folder') {
+    const { folderCount, requestCount } = countFolderDescendants(target.folder)
+    return { name: target.folder.name, descendantFolderCount: folderCount, requestCount, dirtyTabCount }
   }
-  walk(collection.folders)
-  return count
+  return { name: target.collection.name, requestCount: countCollectionRequests(target.collection), dirtyTabCount }
 }
 
 export function ApiClientView(props: ApiClientViewProps): ReactElement {
   const api = useHostApi()
   const collections = useCollections()
+  // WP5 契约：视图层创建 clipboard 实例，与树（props）和删除流（Cut 源级联清空）共享。
+  const treeClipboard = useTreeClipboard({ runMutation: collections.runMutation })
   const environments = useEnvironments()
   const execute = useExecute()
 
@@ -158,7 +216,16 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
   const [activeEnvironmentId, setActiveEnvironmentId] = useState<string | undefined>()
   const [importReport, setImportReport] = useState<ImportReport | undefined>()
   const [saveModalTab, setSaveModalTab] = useState<RequestTab | undefined>()
+  /** 树删除确认（§7.1–§7.3）：目标节点快照 + Host DELETE pending。 */
+  const [deleteTarget, setDeleteTarget] = useState<TreeDeleteTarget | undefined>()
+  const [deletePending, setDeletePending] = useState(false)
+  /** dirty tab 关闭确认（§7.5）：待关闭 tab key。 */
+  const [closingTabKey, setClosingTabKey] = useState<string | undefined>()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  /** API Client 根容器（右键菜单定位边界，CollectionTree §6.3）。 */
+  const apiClientRootRef = useRef<HTMLDivElement | null>(null)
+  /** ResizableCollectionPane 命令柄（打开 Request 成功路径 → drawer 自动关闭，UX §5）。 */
+  const paneRef = useRef<ResizableCollectionPaneHandle | null>(null)
 
   // 初始加载 profile settings（activeEnvironmentId 持久化选择状态）。
   useEffect(() => {
@@ -174,9 +241,30 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
   }, [api])
 
   const activeTab = tabs.find((tab) => tab.key === activeKey)
+  /** 当前激活环境（树的安全拷贝上下文 + Headers/Params plan preview 解析上下文）。 */
+  const activeEnvironment = environments.environments.find((environment) => environment.id === activeEnvironmentId)
+  /** 激活草稿所属 Collection（plan preview 的 inherit auth 链 + collection 变量上下文）。 */
+  const activeCollection =
+    activeTab === undefined || activeTab.draft.collectionId === ''
+      ? undefined
+      : collections.collections.find((item) => item.id === activeTab.draft.collectionId)
+
+  // 最新 tabs/activeKey 的渲染期镜像（与 ResizableCollectionPane 的 envRef 同款模式）：
+  // 删除/关闭的异步续体在 await 之后读取，避免陈旧闭包算错 tab selection。
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+  const activeKeyRef = useRef(activeKey)
+  activeKeyRef.current = activeKey
 
   const updateTab = useCallback((key: string, updater: (tab: RequestTab) => RequestTab): void => {
     setTabs((prev) => prev.map((tab) => (tab.key === key ? updater(tab) : tab)))
+  }, [])
+
+  /** tab 移除统一出口：removeTabsAndSelectNext 纯函数（§7.4 左邻规则），此处不重实现。 */
+  const applyTabRemoval = useCallback((removedKeys: string[]): void => {
+    const selection = removeTabsAndSelectNext(tabsRef.current, activeKeyRef.current, removedKeys)
+    setTabs(selection.tabs)
+    setActiveKey(selection.activeKey)
   }, [])
 
   const openRequest = useCallback(
@@ -192,29 +280,20 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
         return [...prev, newTab({ ...request, url: displayUrl, params: [...request.params], headers: [...request.headers] }, request.id)]
       })
       setActiveKey(request.id)
+      // UX §5 关闭条件：打开 Request → hidden 态 drawer 自动关闭（docked 态无副作用）。
+      paneRef.current?.onRequestOpened()
     },
     [],
   )
 
-  const openNewRequest = useCallback((collectionId?: string): void => {
+  const openNewRequest = useCallback((collectionId?: string, folderId?: string): void => {
     setPane('main')
-    const tab = newTab(blankDraft(collectionId))
+    const tab = newTab(blankDraft(collectionId, folderId))
     setTabs((prev) => [...prev, tab])
     setActiveKey(tab.key)
+    // 树「新建 Request」（drawer 内入口）同样属于「打开 Request」成功路径。
+    paneRef.current?.onRequestOpened()
   }, [])
-
-  const closeTab = useCallback(
-    (key: string): void => {
-      setTabs((prev) => prev.filter((tab) => tab.key !== key))
-      if (activeKey === key) {
-        setActiveKey((prev) => {
-          const remaining = tabs.filter((tab) => tab.key !== key)
-          return remaining.length > 0 ? remaining[remaining.length - 1]!.key : prev === key ? undefined : prev
-        })
-      }
-    },
-    [activeKey, tabs],
-  )
 
   // ---- URL ↔ Params 双向同步（core request/build 互逆纯函数）----
   // 同步不变量：url.query ≡ serializeParams(enabled params)（表格是 query 的结构化镜像）。
@@ -241,12 +320,13 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
   // ---- Send ----
   const send = async (tab: RequestTab): Promise<void> => {
     if (tab.draft.url.trim() === '') {
-      toast.error('URL is empty')
+      toast.error('URL 为空')
       return
     }
     // Clean saved tabs execute by requestId so the history entry carries the
     // requestId chain (§10 「重新执行」经 requestId + SecretRef 链；dirty drafts
     // keep executing the in-editor projection).
+    // §4.9：stale 只禁 mutation（Save/树），Send 保留。
     const response = await execute.execute({
       ...(tab.requestId !== undefined && !tab.dirty && !tab.authDirty
         ? { requestId: tab.requestId }
@@ -333,7 +413,7 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
     }
   }
 
-  // ---- Save ----
+  // ---- Save（§4.9：stale 时按钮禁用；send 不受限）----
   const save = (tab: RequestTab): void => {
     if (tab.requestId !== undefined) {
       const patch: Record<string, unknown> = {
@@ -345,33 +425,19 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
         params: tab.draft.params,
         headers: tab.draft.headers,
         body: tab.draft.body,
+        // §4.1.1：suppression 清单随 Save 持久化（Host PATCH 已做 §3.3 校验+规范化）。
+        ...(tab.draft.suppressedGeneratedHeaders !== undefined ? { suppressedGeneratedHeaders: tab.draft.suppressedGeneratedHeaders } : {}),
       }
       if (tab.authDirty) patch.auth = tab.draft.auth
       void collections.patchRequest(tab.requestId, patch).then((updated) => {
         if (updated !== undefined) {
           updateTab(tab.key, (current) => ({ ...current, dirty: false, authDirty: false }))
-          toast.info('Request saved')
+          toast.info('请求已保存')
         }
       })
       return
     }
     setSaveModalTab(tab)
-  }
-
-  const impliedContentType = (tab: RequestTab): string | undefined => {
-    const body = tab.draft.body
-    switch (body.type) {
-      case 'json':
-        return 'application/json'
-      case 'raw':
-        return 'text/plain'
-      case 'urlencoded':
-        return 'application/x-www-form-urlencoded'
-      case 'form-data':
-        return 'multipart/form-data'
-      default:
-        return undefined
-    }
   }
 
   // ---- Import（Postman v2.1，走 §5.1 端点 25）----
@@ -381,57 +447,78 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
       const parsed: unknown = JSON.parse(text)
       const report = await api.post<ImportReport>('/import/postman', { collection: parsed, name: file.name.replace(/\.json$/i, '') })
       setImportReport(report)
-      collections.refresh()
+      void collections.refresh()
     } catch (error) {
-      toast.error(`import failed: ${error instanceof Error ? error.message : String(error)}`)
+      toast.error(`导入失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
-  const treeHandlers = useMemo(
-    () => ({
-      onOpenRequest: openRequest,
-      onNewCollection: () => {
-        const name = globalThis.prompt?.('Collection name:')
-        if (name !== undefined && name !== null && name.trim() !== '') void collections.createCollection(name.trim())
-      },
-      onNewRequest: (collectionId: string) => openNewRequest(collectionId),
-      onRenameCollection: (collection: { id: string; name: string }) => {
-        const name = globalThis.prompt?.('Rename collection:', collection.name)
-        if (name !== undefined && name !== null && name.trim() !== '') void collections.renameCollection(collection.id, name.trim())
-      },
-      onDeleteCollection: (collection: { id: string; name: string }) => {
-        if (globalThis.confirm?.(`Delete collection "${collection.name}"?`) === true) void collections.deleteCollection(collection.id)
-      },
-      onDuplicateCollection: (collection: { id: string }) => void collections.duplicateCollection(collection.id),
-      onRenameRequest: (request: ApiRequest) => {
-        const name = globalThis.prompt?.('Rename request:', request.name)
-        if (name !== undefined && name !== null && name.trim() !== '') {
-          void collections.patchRequest(request.id, { name: name.trim() }).then((updated) => {
-            if (updated !== undefined) updateTab(request.id, (current) => ({ ...current, draft: { ...current.draft, name: updated.name } }))
-          })
-        }
-      },
-      onDeleteRequest: (request: ApiRequest) => {
-        if (globalThis.confirm?.(`Delete request "${request.name}"?`) === true) {
-          void collections.deleteRequest(request.id)
-          closeTab(request.id)
-        }
-      },
-      onDuplicateRequest: (request: ApiRequest) => void collections.duplicateRequest(request.id),
-      onReorderRequest: (collection: { id: string; requests: ApiRequest[] }, request: ApiRequest, direction: -1 | 1) => {
-        const ids = collection.requests.map((item) => item.id)
-        const index = ids.indexOf(request.id)
-        const target = index + direction
-        if (index < 0 || target < 0 || target >= ids.length) return
-        ;[ids[index], ids[target]] = [ids[target]!, ids[index]!]
-        void collections.reorderCollection(collection.id, ids)
-      },
-    }),
-    [collections, openRequest, openNewRequest, closeTab, updateTab],
-  )
+  // ---- 树 handlers（WP5 新契约：树已内化 create/rename/duplicate/reorder/clipboard 动作）----
+  const treeHandlers: CollectionTreeHandlers = {
+    onOpenRequest: openRequest,
+    onNewRequest: (collectionId, folderId) => openNewRequest(collectionId, folderId),
+    onRequestDelete: (target) => setDeleteTarget(target),
+    // 树行内重命名成功 → 同步已打开 tab 的草稿名（Host 已持久化，不置 dirty）。
+    // R3 同类匹配：保存成功的草稿 tab key 仍为 draft-N，须按 key∨requestId 双匹配。
+    onRequestRenamed: (updated) => {
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.key === updated.id || tab.requestId === updated.id ? { ...tab, draft: { ...tab.draft, name: updated.name } } : tab,
+        ),
+      )
+    },
+  }
+
+  // ---- 树删除流（§7.1 统计 → §7.2 dirty 警示 → §7.3 Host 成功后才关 tab）----
+
+  /** 确认框统计：递归数字 = core 权威纯函数；dirty 数 = 受影响 tab 快照（§7.1）。 */
+  const deleteStats = deleteTarget === undefined ? undefined : computeDeleteStats(deleteTarget, tabs)
+
+  const confirmDelete = async (): Promise<void> => {
+    const target = deleteTarget
+    if (target === undefined || deletePending) return
+    // 统计/清理共用同一份快照：affected request ids 必须在 mutation 之前取
+    //（删除成功后投影即刷新，目标节点引用会消失）。
+    const affectedIds = collectSubtreeRequestIds(target)
+    setDeletePending(true)
+    let outcome: MutationOutcome = { committed: false, refreshed: false }
+    try {
+      // 版本参数 = 打开确认框时刻的投影 updatedAt（§4.3 乐观锁；并发修改 → Host 409）。
+      if (target.kind === 'request') outcome = await collections.deleteRequest(target.request.id, target.collection.updatedAt)
+      else if (target.kind === 'folder') outcome = await collections.deleteFolder(target.collection.id, target.folder.id, target.collection.updatedAt)
+      else outcome = await collections.deleteCollection(target.collection.id, target.collection.updatedAt)
+    } finally {
+      setDeletePending(false)
+      setDeleteTarget(undefined)
+    }
+    // §7.3：committed=false（含 409）→ tree/tabs/activeKey 全不动；错误 toast 已由 hook 发出。
+    if (!outcome.committed) return
+    // Host 成功后才移除 affected tabs（§7.4 左邻规则，纯函数不重实现）。
+    // R3：被删 request ids 经 key∨requestId 双匹配映射回 tab.key——保存成功的
+    // draft-key tab（key=draft-N，仅 requestId 指向 Host 记录）不再幽灵存活。
+    const removedKeys = tabsRef.current.filter((tab) => tabAffectedByDeletion(tab, affectedIds)).map((tab) => tab.key)
+    applyTabRemoval(removedKeys)
+    // §0.3：本 Client 删除了 Cut 源（含 Folder/Collection 级联）→ 立即清空本地剪贴板 token。
+    // 通知面 = request ids（与 Cut 源 requestId 比对），不是 tab keys。
+    treeClipboard.notifyLocalRequestsDeleted(affectedIds)
+  }
+
+  // ---- dirty tab 关闭（§7.5）：clean 立即关；dirty 先确认（P0 无自动保存）----
+  const requestCloseTab = (key: string): void => {
+    const tab = tabs.find((item) => item.key === key)
+    if (tab === undefined) return
+    if (!tab.dirty) {
+      applyTabRemoval([key])
+      return
+    }
+    setClosingTabKey(key)
+  }
+
+  const closingTab = closingTabKey === undefined ? undefined : tabs.find((tab) => tab.key === closingTabKey)
 
   return (
     <div
+      ref={apiClientRootRef}
       data-dsh-api-client="api-client-view"
       style={{
         display: 'flex',
@@ -444,19 +531,19 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
         overflow: 'hidden',
       }}
     >
-      {/* 顶栏（§4）：History / Import / Environment + 环境切换 + 关闭 */}
+      {/* 顶栏（§4）：历史 / 导入 / 环境 + 环境切换 + 交给 Agent + 关闭 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${colors.border}` }}>
         <strong style={{ fontSize: 14 }}>API Client</strong>
         <span style={{ flex: 1 }} />
         <EnvironmentSelector environments={environments.environments} activeEnvironmentId={activeEnvironmentId} onSelected={setActiveEnvironmentId} />
         <button type="button" style={topButtonStyle} onClick={() => setPane('history')}>
-          History
+          历史
         </button>
         <button type="button" style={topButtonStyle} onClick={() => fileInputRef.current?.click()}>
-          Import
+          导入
         </button>
         <button type="button" style={topButtonStyle} onClick={() => setPane('environment')}>
-          Environment
+          环境
         </button>
         <button
           type="button"
@@ -473,7 +560,7 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
           交给 Agent
         </button>
         {props.onClose !== undefined && (
-          <button type="button" style={topButtonStyle} onClick={props.onClose} title="Close panel (yield to Conversation)">
+          <button type="button" style={topButtonStyle} onClick={props.onClose} title="关闭面板（回到对话）">
             ✕
           </button>
         )}
@@ -493,119 +580,168 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
       {pane === 'history' && <HistoryView onBack={() => setPane('main')} activeEnvironmentId={activeEnvironmentId} />}
       {pane === 'environment' && <EnvironmentView onBack={() => setPane('main')} />}
       {pane === 'main' && (
-        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          <div style={{ flex: '0 0 260px', borderRight: `1px solid ${colors.border}`, minHeight: 0 }}>
-            <CollectionTree
-              collections={collections.collections}
-              loading={collections.loading}
-              selectedRequestId={activeTab?.requestId}
-              handlers={treeHandlers}
-            />
-          </div>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
-            <RequestTabs
-              tabs={tabs.map((tab) => ({ key: tab.key, name: tab.draft.name, method: tab.draft.method, dirty: tab.dirty }))}
-              activeKey={activeKey}
-              onSelect={setActiveKey}
-              onClose={closeTab}
-              onNew={() => openNewRequest()}
-            />
-            {activeTab === undefined && (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.textSecondary }}>
-                Open a request from the tree, or start a new tab.
-              </div>
-            )}
-            {activeTab !== undefined && (
-              <>
-                <div style={{ display: 'flex', gap: 6, padding: '8px 10px', alignItems: 'stretch' }}>
-                  <MethodSelector
-                    value={activeTab.draft.method}
-                    onChange={(method) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, method }, dirty: true }))}
-                  />
-                  <UrlBar
-                    value={activeTab.draft.url}
-                    onChange={(url) => handleUrlChange(activeTab, url)}
-                    onSend={() => void send(activeTab)}
-                    onSave={() => save(activeTab)}
-                    sending={execute.executing}
-                    saveDisabled={!activeTab.dirty && activeTab.requestId !== undefined}
-                  />
+        /* WP4 契约：pane 根容器宽度 = viewport 参照系（外层不再包滚动/填充容器）；
+           树为 children、编辑器整列为 main——resize/三态/drawer 切换不重挂载（AC-34）。 */
+        <ResizableCollectionPane
+          ref={paneRef}
+          main={
+            <>
+              <RequestTabs
+                tabs={tabs.map((tab) => ({ key: tab.key, name: tab.draft.name, method: tab.draft.method, dirty: tab.dirty }))}
+                activeKey={activeKey}
+                onSelect={setActiveKey}
+                onClose={requestCloseTab}
+                onNew={() => openNewRequest()}
+              />
+              {activeTab === undefined && (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.textSecondary }}>
+                  从左侧请求树打开一个请求，或新建一个标签页。
                 </div>
-                <div style={{ display: 'flex', gap: 2, padding: '0 10px', borderBottom: `1px solid ${colors.border}` }}>
-                  {EDITOR_TABS.map((tab) => (
-                    <button
-                      key={tab.value}
-                      type="button"
-                      onClick={() => setEditorTab(tab.value)}
+              )}
+              {activeTab !== undefined && (
+                <>
+                  <div style={{ display: 'flex', gap: 6, padding: '8px 10px', alignItems: 'stretch' }}>
+                    <MethodSelector
+                      value={activeTab.draft.method}
+                      onChange={(method) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, method }, dirty: true }))}
+                    />
+                    <UrlBar
+                      value={activeTab.draft.url}
+                      onChange={(url) => handleUrlChange(activeTab, url)}
+                      onSend={() => void send(activeTab)}
+                      onSave={() => save(activeTab)}
+                      sending={execute.executing}
+                      saveDisabled={collections.stale || (!activeTab.dirty && activeTab.requestId !== undefined)}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 2, padding: '0 10px', borderBottom: `1px solid ${colors.border}` }}>
+                    {EDITOR_TABS.map((tab) => (
+                      <button
+                        key={tab.value}
+                        type="button"
+                        onClick={() => setEditorTab(tab.value)}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          borderBottom: editorTab === tab.value ? `2px solid ${colors.brand}` : '2px solid transparent',
+                          color: editorTab === tab.value ? colors.text : colors.textSecondary,
+                          cursor: 'pointer',
+                          fontSize: font.size,
+                          padding: '4px 8px',
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                    <span style={{ flex: 1 }} />
+                    <input
+                      value={activeTab.draft.name}
+                      onChange={(event) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, name: event.target.value }, dirty: true }))}
+                      title="请求名称"
                       style={{
+                        width: 200,
                         background: 'transparent',
                         border: 'none',
-                        borderBottom: editorTab === tab.value ? `2px solid ${colors.brand}` : '2px solid transparent',
-                        color: editorTab === tab.value ? colors.text : colors.textSecondary,
-                        cursor: 'pointer',
+                        borderBottom: `1px solid ${colors.border}`,
+                        color: colors.text,
+                        font: 'inherit',
                         fontSize: font.size,
-                        padding: '4px 8px',
+                        padding: '2px 4px',
+                        outline: 'none',
+                        textAlign: 'right',
                       }}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                  <span style={{ flex: 1 }} />
-                  <input
-                    value={activeTab.draft.name}
-                    onChange={(event) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, name: event.target.value }, dirty: true }))}
-                    title="Request name"
-                    style={{
-                      width: 200,
-                      background: 'transparent',
-                      border: 'none',
-                      borderBottom: `1px solid ${colors.border}`,
-                      color: colors.text,
-                      font: 'inherit',
-                      fontSize: font.size,
-                      padding: '2px 4px',
-                      outline: 'none',
-                      textAlign: 'right',
-                    }}
-                  />
-                </div>
-                <div style={{ flex: 1, overflow: 'auto', padding: '10px 12px', minHeight: 0 }}>
-                  {editorTab === 'params' && <ParamsEditor rows={activeTab.draft.params} onChange={(rows) => handleParamsChange(activeTab, rows)} />}
-                  {editorTab === 'headers' && (
-                    <HeadersEditor
-                      rows={activeTab.draft.headers}
-                      onChange={(rows) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, headers: rows }, dirty: true }))}
-                      impliedContentType={impliedContentType(activeTab)}
                     />
-                  )}
-                  {editorTab === 'auth' && (
-                    <AuthEditor
-                      value={activeTab.draft.auth}
-                      onChange={(auth) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, auth }, dirty: true, authDirty: true }))}
+                  </div>
+                  <div style={{ flex: 1, overflow: 'auto', padding: '10px 12px', minHeight: 0 }}>
+                    {editorTab === 'params' && (
+                      <ParamsEditor
+                        draft={activeTab.draft}
+                        environment={activeEnvironment}
+                        collection={activeCollection}
+                        onRowsChange={(rows) => handleParamsChange(activeTab, rows)}
+                        onNavigate={setEditorTab}
+                      />
+                    )}
+                    {editorTab === 'headers' && (
+                      <HeadersEditor
+                        draft={activeTab.draft}
+                        environment={activeEnvironment}
+                        collection={activeCollection}
+                        onRowsChange={(rows) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, headers: rows }, dirty: true }))}
+                        onSuppressedChange={(next) =>
+                          updateTab(activeTab.key, (current) => ({
+                            ...current,
+                            draft: { ...current.draft, suppressedGeneratedHeaders: next },
+                            dirty: true,
+                          }))
+                        }
+                        onNavigate={setEditorTab}
+                      />
+                    )}
+                    {editorTab === 'auth' && (
+                      <AuthEditor
+                        value={activeTab.draft.auth}
+                        onChange={(auth) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, auth }, dirty: true, authDirty: true }))}
+                      />
+                    )}
+                    {editorTab === 'body' && (
+                      <BodyEditor
+                        value={activeTab.draft.body}
+                        onChange={(body) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, body }, dirty: true }))}
+                      />
+                    )}
+                    {editorTab === 'scripts' && <ScriptsPanel scripts={activeTab.draft.scripts} />}
+                  </div>
+                  <div style={{ flex: '0 0 38%', minHeight: 120, display: 'flex', flexDirection: 'column' }}>
+                    <ResponseViewer
+                      result={activeTab.response}
+                      executing={execute.executing}
+                      scripts={activeTab.draft.scripts}
+                      onSendToAgent={() => openAgentConfirm(activeTab)}
                     />
-                  )}
-                  {editorTab === 'body' && (
-                    <BodyEditor
-                      value={activeTab.draft.body}
-                      onChange={(body) => updateTab(activeTab.key, (current) => ({ ...current, draft: { ...current.draft, body }, dirty: true }))}
-                    />
-                  )}
-                  {editorTab === 'scripts' && <ScriptsPanel scripts={activeTab.draft.scripts} />}
-                </div>
-                <div style={{ flex: '0 0 38%', minHeight: 120, display: 'flex', flexDirection: 'column' }}>
-                  <ResponseViewer
-                    result={activeTab.response}
-                    executing={execute.executing}
-                    scripts={activeTab.draft.scripts}
-                    onSendToAgent={() => openAgentConfirm(activeTab)}
-                  />
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+                  </div>
+                </>
+              )}
+            </>
+          }
+        >
+          <CollectionTree
+            collections={collections}
+            clipboard={treeClipboard}
+            selectedRequestId={activeTab?.requestId}
+            environment={activeEnvironment}
+            menuBoundaryRef={apiClientRootRef}
+            handlers={treeHandlers}
+          />
+        </ResizableCollectionPane>
       )}
 
+      {/* 树删除确认（§7.1/§7.2；确认按钮 pending 期间 Esc/X/遮罩不再取消——删除已在途） */}
+      {deleteTarget !== undefined && deleteStats !== undefined && (
+        <TreeDeleteConfirmDialog
+          kind={deleteTarget.kind}
+          name={deleteStats.name}
+          descendantFolderCount={deleteStats.descendantFolderCount}
+          requestCount={deleteStats.requestCount}
+          dirtyTabCount={deleteStats.dirtyTabCount}
+          pending={deletePending}
+          onCancel={() => {
+            if (!deletePending) setDeleteTarget(undefined)
+          }}
+          onConfirm={() => void confirmDelete()}
+        />
+      )}
+      {/* dirty tab 关闭确认（§7.5；P0 不提供自动保存出口） */}
+      {closingTab !== undefined && (
+        <DirtyTabCloseDialog
+          name={closingTab.draft.name}
+          onCancel={() => setClosingTabKey(undefined)}
+          onConfirm={() => {
+            applyTabRemoval([closingTab.key])
+            setClosingTabKey(undefined)
+          }}
+        />
+      )}
       {saveModalTab !== undefined && (
         <SaveRequestModal
           tab={saveModalTab}
@@ -620,14 +756,14 @@ export function ApiClientView(props: ApiClientViewProps): ReactElement {
               authDirty: false,
             }))
             setSaveModalTab(undefined)
-            // Refresh the tree so the saved request appears without a page reload.
-            collections.refresh()
-            toast.info('Request saved')
+            // 保存成功后刷新树（新请求立即可见，无需整页重载）。
+            void collections.refresh()
+            toast.info('请求已保存')
           }}
         />
       )}
       {importReport !== undefined && (
-        <Modal title="Postman Import — Migration Report" width={720} onClose={() => setImportReport(undefined)}>
+        <Modal title="Postman 导入 — 迁移报告" width={720} onClose={() => setImportReport(undefined)}>
           <ImportReportView report={importReport} onClose={() => setImportReport(undefined)} />
         </Modal>
       )}
@@ -663,23 +799,24 @@ const topButtonStyle: CSSProperties = {
   padding: '3px 10px',
 }
 
-/** Save 到 Collection（含选 folder，§6/TC-UI-13）。 */
+/** Save 到 Collection（含选 folder，§6/TC-UI-13）：草稿携带的 folderId 作为文件夹默认值。 */
 function SaveRequestModal(props: {
   tab: RequestTab
-  collections: ReturnType<typeof useCollections>['collections']
+  collections: Collection[]
   onCancel: () => void
   onSaved: (request: ApiRequest) => void
 }): ReactElement {
   const collections = useCollections()
   const [collectionId, setCollectionId] = useState(props.tab.draft.collectionId !== '' ? props.tab.draft.collectionId : (props.collections[0]?.id ?? ''))
-  const [folderId, setFolderId] = useState('')
+  // 树「新建 Request」入口注入的默认文件夹（onNewRequest → blankDraft.folderId）。
+  const [folderId, setFolderId] = useState(props.tab.draft.folderId ?? '')
   const collection = props.collections.find((item) => item.id === collectionId)
   const folderOptions: FolderOption[] = []
   if (collection !== undefined) flattenFolders(collection.folders, '', folderOptions)
 
   const submit = async (): Promise<void> => {
     if (collectionId === '') {
-      toast.error('Select a collection first')
+      toast.error('请先选择一个集合')
       return
     }
     const draft = props.tab.draft
@@ -693,28 +830,38 @@ function SaveRequestModal(props: {
       auth: draft.auth,
       body: draft.body,
       ...(draft.scripts !== undefined ? { scripts: draft.scripts } : {}),
+      // §4.1.1：草稿携带的 suppression 清单随首次保存落库（Host 默认 []）。
+      ...(draft.suppressedGeneratedHeaders !== undefined ? { suppressedGeneratedHeaders: draft.suppressedGeneratedHeaders } : {}),
       ...(folderId !== '' ? { folderId } : {}),
     })
     if (saved !== undefined) props.onSaved(saved)
   }
 
   return (
-    <Modal title="Save request to collection" onClose={props.onCancel}>
-      {props.collections.length === 0 && <div style={{ color: colors.textSecondary }}>No collections yet — create one from the tree first.</div>}
+    <Modal title="保存请求到集合" onClose={props.onCancel}>
+      {props.collections.length === 0 && <div style={{ color: colors.textSecondary }}>暂无集合 —— 请先在左侧请求树中新建。</div>}
       <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 8, alignItems: 'center' }}>
-        <span style={{ color: colors.textSecondary }}>Name</span>
+        <span style={{ color: colors.textSecondary }}>名称</span>
         <input value={props.tab.draft.name} style={modalInputStyle} readOnly title="名称在编辑器顶栏改名" />
-        <span style={{ color: colors.textSecondary }}>Collection</span>
-        <select value={collectionId} onChange={(event) => setCollectionId(event.target.value)} style={modalInputStyle}>
+        <span style={{ color: colors.textSecondary }}>集合</span>
+        <select
+          value={collectionId}
+          onChange={(event) => {
+            // 切换集合后原 folderId 不再合法 → 复位到（顶层）。
+            setCollectionId(event.target.value)
+            setFolderId('')
+          }}
+          style={modalInputStyle}
+        >
           {props.collections.map((item) => (
             <option key={item.id} value={item.id}>
               {item.name}
             </option>
           ))}
         </select>
-        <span style={{ color: colors.textSecondary }}>Folder</span>
+        <span style={{ color: colors.textSecondary }}>文件夹</span>
         <select value={folderId} onChange={(event) => setFolderId(event.target.value)} style={modalInputStyle}>
-          <option value="">(top level)</option>
+          <option value="">（顶层）</option>
           {folderOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
@@ -738,7 +885,7 @@ function SaveRequestModal(props: {
             opacity: props.collections.length === 0 ? 0.5 : 1,
           }}
         >
-          Save
+          保存
         </button>
       </div>
     </Modal>

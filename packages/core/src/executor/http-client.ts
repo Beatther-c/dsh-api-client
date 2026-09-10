@@ -15,6 +15,7 @@ import { Agent, request as undiciRequest } from 'undici'
 import type { Dispatcher } from 'undici'
 import type { HttpMethod, KeyValue } from '@dsh-api-client/shared'
 import type { PolicyDecision, PolicyTarget } from '../security/network-policy.ts'
+import { groupHeadersByLowerName } from '../request/build.ts'
 import { ExecutorError } from './errors.ts'
 
 export type PolicyEvaluator = (target: PolicyTarget) => PolicyDecision
@@ -64,16 +65,13 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 const DEFAULT_MAX_REDIRECTS = 10
 
 function headersToWire(headers: KeyValue[]): Record<string, string | string[]> {
+  // P0 §5.4 / UX §6.3：按 lowercase 名称聚合——保留第一行用户拼写作为 object key，
+  // 值按原用户顺序 string[]（undici 对数组值逐条发送为重复 Header 行；实际重复
+  // Header 行为由 tests/p0-undici-wire.spec.ts 集成固化，不承诺协议不允许的语义）。
+  // 不得由于大小写差异创建两个 wire object keys。
   const out: Record<string, string | string[]> = {}
-  for (const h of headers) {
-    const existing = out[h.key]
-    if (existing === undefined) {
-      out[h.key] = h.value
-    } else if (Array.isArray(existing)) {
-      existing.push(h.value)
-    } else {
-      out[h.key] = [existing, h.value]
-    }
+  for (const group of groupHeadersByLowerName(headers)) {
+    out[group.name] = group.values.length === 1 ? (group.values[0] as string) : group.values
   }
   return out
 }
